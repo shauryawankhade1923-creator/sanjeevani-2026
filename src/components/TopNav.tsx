@@ -43,37 +43,50 @@ export const TopNav: React.FC = () => {
     <header className="w-full pt-4 pb-2 px-4 sm:px-8 max-w-[1520px] mx-auto">
       <div className="flex items-center justify-between gap-4">
         
-        {/* Left: Official Sanjeevani Brand Logo */}
+        {/* Left: Official Sanjeevani Brand Logo & Identity */}
         <div 
-          className="flex items-center space-x-3 cursor-pointer shrink-0"
+          className="flex items-center space-x-3 sm:space-x-4 cursor-pointer shrink-0 group select-none"
           onClick={() => setActiveTab('dashboard')}
+          title="Return to Dashboard"
         >
-          <div className="h-12 w-12 rounded-2xl overflow-hidden bg-white shadow-sm border border-slate-200/60 p-0.5 flex items-center justify-center">
+          {/* Prominent High-Visibility Logo Badge */}
+          <div className="h-14 w-24 sm:h-16 sm:w-28 md:h-[72px] md:w-[130px] lg:h-[76px] lg:w-[138px] rounded-2xl bg-white shadow-xs group-hover:shadow-md border border-slate-200/90 group-hover:border-emerald-600/40 p-1.5 sm:p-2 flex items-center justify-center shrink-0 transition-all duration-200">
             <img 
               src="/sanjeevani-logo.jpg" 
-              alt="Sanjeevani Logo" 
-              className="w-full h-full object-contain"
+              alt="SANJEEVANI Logo - What Matters When It Matters" 
+              className="w-full h-full object-contain filter contrast-[1.03] transition-transform duration-200 group-hover:scale-[1.02]"
             />
           </div>
-          <div>
-            <h1 className="font-extrabold text-xl sm:text-2xl tracking-tight text-[#0C382E] leading-tight font-sans">
-              SANJEEVANI
-            </h1>
-            <p className="text-[9px] sm:text-[10px] font-bold tracking-wider text-[#1F5448] uppercase">
-              What Matters When It Matters
+
+          {/* Wordmark and Tagline Lockup */}
+          <div className="flex flex-col justify-center">
+            <div className="flex items-center space-x-2">
+              <h1 className="font-black text-xl sm:text-2xl lg:text-[28px] tracking-tight text-[#0C382E] leading-none font-sans group-hover:text-[#06241D] transition-colors">
+                SANJEEVANI
+              </h1>
+              {/* Restrained Saffron Accent Indicator */}
+              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-extrabold uppercase bg-amber-500/10 text-amber-900 border border-amber-500/30 tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#EA580C] animate-pulse" />
+                Civic Ops
+              </span>
+            </div>
+            
+            {/* Tagline: Exactly "WHAT MATTERS WHEN IT MATTERS" */}
+            <p className="text-[9.5px] sm:text-[11px] lg:text-[11.5px] font-extrabold tracking-[0.16em] text-[#16493E] uppercase mt-1 leading-tight font-sans">
+              WHAT MATTERS WHEN IT MATTERS
             </p>
           </div>
         </div>
 
         {/* Center: Capsule Pill Navigation Bar (Matching User Screenshot) */}
-        <nav className="hidden lg:flex items-center bg-white/80 backdrop-blur-md rounded-full px-2 py-1.5 border border-slate-200/80 shadow-xs">
+        <nav className="hidden lg:flex items-center bg-white/80 backdrop-blur-md rounded-full px-1.5 lg:px-2 py-1 border border-slate-200/80 shadow-xs">
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`px-4 py-2 rounded-full text-xs font-semibold transition-all duration-200 ${
+                className={`px-2.5 lg:px-3.5 py-1.5 lg:py-2 rounded-full text-[11px] lg:text-xs font-semibold transition-all duration-200 whitespace-nowrap ${
                   isActive
                     ? 'bg-[#E5F940] text-slate-900 font-bold shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
