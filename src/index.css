@@ -42,6 +42,17 @@
   background: rgba(0, 0, 0, 0.25);
 }
 
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Subtle pulse for active tracking indicators */
 @keyframes pulse-subtle {
   0%, 100% { opacity: 1; transform: scale(1); }

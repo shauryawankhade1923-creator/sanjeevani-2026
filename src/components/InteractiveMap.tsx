@@ -13,7 +13,11 @@ import {
   Info
 } from 'lucide-react';
 
-export const InteractiveMap: React.FC = () => {
+interface InteractiveMapProps {
+  compact?: boolean;
+}
+
+export const InteractiveMap: React.FC<InteractiveMapProps> = ({ compact = false }) => {
   const { donations, shelters, volunteers, tasks } = useApp();
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<any>(null);
@@ -41,20 +45,29 @@ export const InteractiveMap: React.FC = () => {
 
         const map = L.map(mapContainerRef.current, {
           center: [28.625, 77.225],
-          zoom: 12,
+          zoom: compact ? 11 : 12,
           zoomControl: false,
         });
 
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        if (!compact) {
+          L.control.zoom({ position: 'bottomright' }).addTo(map);
+        }
 
-        // OpenStreetMap CartoDB Positron / OSM standard
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-          attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        // Clean OpenStreetMap standard tile layer (100% open-source, no API key required)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
           maxZoom: 19,
+          subdomains: ['a', 'b', 'c'],
         }).addTo(map);
 
         leafletMapRef.current = map;
         renderLeafletElements(L, map);
+
+        setTimeout(() => {
+          if (isMounted && leafletMapRef.current) {
+            leafletMapRef.current.invalidateSize();
+          }
+        }, 200);
       } catch (err) {
         console.warn('Leaflet tile initialization fallback to SVG canvas:', err);
         if (isMounted) setMapEngine('svg');
@@ -70,7 +83,7 @@ export const InteractiveMap: React.FC = () => {
         leafletMapRef.current = null;
       }
     };
-  }, []);
+  }, [compact]);
 
   // Update markers when state changes
   useEffect(() => {
@@ -178,42 +191,65 @@ export const InteractiveMap: React.FC = () => {
         polylinesRef.current.push(polyline);
       }
     });
+
+    // Auto-fit map to show all relevant entities
+    const allCoords: [number, number][] = [];
+    donations.forEach((d) => {
+      if (d.status !== 'EXPIRED') allCoords.push([d.coordinates.lat, d.coordinates.lng]);
+    });
+    shelters.forEach((s) => allCoords.push([s.coordinates.lat, s.coordinates.lng]));
+    volunteers.forEach((v) => allCoords.push([v.coordinates.lat, v.coordinates.lng]));
+
+    if (allCoords.length > 0) {
+      try {
+        map.fitBounds(allCoords, { 
+          padding: compact ? [20, 20] : [45, 45], 
+          maxZoom: compact ? 13 : 14 
+        });
+      } catch (err) {
+        // Ignore bounds error
+      }
+    }
   };
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shadow-sm flex flex-col">
-      {/* Top Map Control Bar */}
-      <div className="absolute top-3 left-3 z-[1000] flex items-center space-x-2 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs font-medium text-slate-700">
-        <span className="flex items-center text-emerald-800">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-700 mr-1.5 animate-pulse" />
-          Live Fleet Radar
-        </span>
-        <span className="text-slate-300">|</span>
-        <span className="text-slate-500">Active Missions: {tasks.filter(t => t.status === 'IN_TRANSIT' || t.status === 'CLAIMED').length}</span>
-      </div>
+    <div className={`relative w-full h-full ${compact ? 'min-h-[220px]' : 'min-h-[460px]'} bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shadow-sm flex flex-col`}>
+      {/* Top Map Control Bar (Only shown in full / non-compact mode to avoid overlap) */}
+      {!compact && (
+        <>
+          <div className="absolute top-3 left-3 z-[1000] flex items-center space-x-2 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs font-medium text-slate-700">
+            <span className="flex items-center text-emerald-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-700 mr-1.5 animate-pulse" />
+              Live Fleet Radar
+            </span>
+            <span className="text-slate-300">|</span>
+            <span className="text-slate-500">Active Missions: {tasks.filter(t => t.status === 'IN_TRANSIT' || t.status === 'CLAIMED').length}</span>
+          </div>
 
-      {/* Legend Badge */}
-      <div className="absolute top-3 right-3 z-[1000] hidden sm:flex items-center space-x-3 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-600">
-        <span className="flex items-center space-x-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-700 inline-block" />
-          <span>Donor</span>
-        </span>
-        <span className="flex items-center space-x-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-600 inline-block" />
-          <span>Shelter</span>
-        </span>
-        <span className="flex items-center space-x-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
-          <span>Rider</span>
-        </span>
-        <span className="flex items-center space-x-1">
-          <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
-          <span>Diverted Route</span>
-        </span>
-      </div>
+          {/* Legend Badge */}
+          <div className="absolute top-3 right-3 z-[1000] hidden sm:flex items-center space-x-3 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-600">
+            <span className="flex items-center space-x-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-700 inline-block" />
+              <span>Donor</span>
+            </span>
+            <span className="flex items-center space-x-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-sky-600 inline-block" />
+              <span>Shelter</span>
+            </span>
+            <span className="flex items-center space-x-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+              <span>Rider</span>
+            </span>
+            <span className="flex items-center space-x-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
+              <span>Diverted Route</span>
+            </span>
+          </div>
+        </>
+      )}
 
       {/* Map View Container */}
-      <div ref={mapContainerRef} className="w-full h-full flex-1 min-h-[440px]" />
+      <div ref={mapContainerRef} className={`w-full h-full flex-1 ${compact ? 'min-h-[220px]' : 'min-h-[440px]'}`} />
 
       {/* Selected Entity Inspector Panel */}
       {selectedEntity && (

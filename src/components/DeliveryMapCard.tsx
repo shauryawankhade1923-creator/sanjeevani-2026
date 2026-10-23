@@ -161,8 +161,8 @@ export const DeliveryMapCard: React.FC = () => {
 
         {/* Task Switcher Pill Strip (if multiple active deliveries exist) */}
         {allAvailableTasks.length > 1 && (
-          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar py-1 mb-2 z-10">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0 mr-1">
+          <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar py-1.5 mb-2.5 z-10 px-0.5">
+            <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider shrink-0 mr-0.5">
               Active Fleet:
             </span>
             {allAvailableTasks.slice(0, 5).map((t, idx) => {
@@ -172,10 +172,10 @@ export const DeliveryMapCard: React.FC = () => {
                 <button
                   key={t.id}
                   onClick={() => setSelectedTaskId(t.id)}
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded-full whitespace-nowrap transition-all border ${
+                  className={`text-[10.5px] font-mono px-3 py-1 rounded-full whitespace-nowrap transition-all border shrink-0 ${
                     isSelected
-                      ? 'bg-[#0C382E] text-[#E5F940] border-[#0C382E] font-bold shadow-xs'
-                      : 'bg-white/60 text-slate-700 border-[#CADBCF] hover:bg-white'
+                      ? 'bg-[#0C382E] text-[#E5F940] border-[#0C382E] font-extrabold shadow-xs scale-[1.02]'
+                      : 'bg-white/80 text-slate-700 border-[#CADBCF] hover:bg-white shadow-2xs hover:text-slate-900 font-semibold'
                   }`}
                 >
                   #{idx + 1} {r?.name.split(' ')[0] || 'Rider'} ({t.quantity}m)
@@ -288,8 +288,8 @@ export const DeliveryMapCard: React.FC = () => {
 
           {/* VIEW MODE 2: Real Embedded Leaflet GIS Map */}
           {viewMode === 'gis' && (
-            <div className="w-full h-full relative z-0">
-              <InteractiveMap />
+            <div className="w-full h-full relative z-0 min-h-[220px]">
+              <InteractiveMap compact={true} />
             </div>
           )}
 
