@@ -24,7 +24,7 @@ const MainLayout: React.FC = () => {
         {activeTab === 'dispatch' && <DispatchCenterView />}
         {activeTab === 'volunteers' && <VolunteersView />}
         {activeTab === 'shelters' && <SheltersView />}
-        {activeTab === 'events' && <LiveOperationsView />}
+        {(activeTab === 'events' || activeTab === 'live') && <LiveOperationsView />}
         {activeTab === 'demo' && <DemoControlCenterView />}
       </main>
     </div>
