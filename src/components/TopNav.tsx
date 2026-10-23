@@ -31,7 +31,7 @@ export const TopNav: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'donations', label: 'Donor Dashboard' },
     { id: 'dispatch', label: 'Relief Coordinator' },
-    { id: 'volunteers', label: 'Volunteer Fleet' },
+    { id: 'volunteers', label: 'Rider Dashboard' },
     { id: 'shelters', label: 'Shelters & Camps' },
     { id: 'events', label: 'Operations Log' },
     { id: 'demo', label: 'Demo Scenarios' },

@@ -33,12 +33,22 @@ export type ShelterStatus =
 
 export type TaskStatus = 
   | 'CLAIMED'
+  | 'ACCEPTED'
+  | 'ARRIVED_PICKUP'
   | 'PICKED_UP'
   | 'IN_TRANSIT'
+  | 'ARRIVED_DESTINATION'
   | 'DIVERTED'
   | 'DELIVERED'
   | 'RECLAIMED'
   | 'CANCELLED';
+
+export interface DelayReport {
+  reason: 'TRAFFIC' | 'VEHICLE_BREAKDOWN' | 'PICKUP_UNAVAILABLE' | 'DESTINATION_UNAVAILABLE' | 'BAD_WEATHER' | 'OTHER';
+  notes: string;
+  reportedAt: string;
+  estimatedDelayMinutes: number;
+}
 
 export interface Coordinates {
   lat: number;
@@ -118,8 +128,16 @@ export interface DeliveryTask {
   status: TaskStatus;
   reservedAt: string;
   claimExpiresAt: string; // deadline before ghost reclaim
+  acceptedAt?: string;
+  arrivedPickupAt?: string;
   pickedUpAt?: string;
+  inTransitAt?: string;
+  delayReport?: DelayReport;
+  arrivedDestinationAt?: string;
   deliveredAt?: string;
+  proofRecipientName?: string;
+  proofNotes?: string;
+  proofPhotoUrl?: string;
   isRerouted: boolean;
   rerouteReason?: string;
   estimatedTransitMinutes: number;

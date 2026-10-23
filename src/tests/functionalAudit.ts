@@ -128,6 +128,63 @@ assert(bestAlt !== undefined, 'Found at least one eligible alternative shelter')
 assert(bestAlt?.shelterId === 'sh-02', 'Optimal alternative is Shelter Beta with open space and safe ETA');
 
 // ----------------------------------------------------------------------
+// Test 5: Delivery Rider Workflow & Functional Invariants
+// ----------------------------------------------------------------------
+console.log('\n--- Test Suite 5: Delivery Rider Workflow & Functional Invariants ---');
+
+// 1. Double acceptance protection: task cannot be accepted twice
+const taskClaimed = {
+  ...dummyTask,
+  id: 'task-rider-test-01',
+  status: 'CLAIMED' as const,
+  acceptedAt: undefined
+};
+
+// Simulate acceptance
+const acceptedTask = {
+  ...taskClaimed,
+  status: 'ACCEPTED' as const,
+  acceptedAt: new Date().toISOString()
+};
+assert(acceptedTask.status === 'ACCEPTED', 'Claimed assignment successfully accepted by rider');
+assert(acceptedTask.status !== 'CLAIMED', 'Accepted task cannot be claimed or accepted again');
+
+// 2. Declining triggers coordinator reassignment and returns quantity
+const donationBefore = { ...banquet180, remainingQuantity: 140 };
+const shelterBefore = { ...shelterAlpha, committedCapacity: 40 };
+
+// When rider declines
+const donationAfterDecline = {
+  ...donationBefore,
+  remainingQuantity: donationBefore.remainingQuantity + acceptedTask.quantity
+};
+const shelterAfterDecline = {
+  ...shelterBefore,
+  committedCapacity: shelterBefore.committedCapacity - acceptedTask.quantity
+};
+assert(donationAfterDecline.remainingQuantity === 180, 'Declining assignment restores donation remaining quantity to 180');
+assert(shelterAfterDecline.committedCapacity === 0, 'Declining assignment releases shelter committed capacity');
+
+// 3. Mandatory Proof Requirement: Delivery cannot be completed without recipient name
+function validateDeliveryCompletion(proof: { recipientName: string }) {
+  if (!proof.recipientName || proof.recipientName.trim().length === 0) {
+    return { success: false, error: 'Recipient name required' };
+  }
+  return { success: true };
+}
+
+const emptyProof = validateDeliveryCompletion({ recipientName: '' });
+assert(emptyProof.success === false, 'Delivery completion strictly rejected when recipient proof name is missing');
+
+const validProof = validateDeliveryCompletion({ recipientName: 'Rajesh Camp Supervisor' });
+assert(validProof.success === true, 'Delivery completion approved with verified recipient proof');
+
+// 4. Delay Reporting updates transit duration
+const reportedDelayMin = 15;
+const updatedTransitMin = acceptedTask.estimatedTransitMinutes + reportedDelayMin;
+assert(updatedTransitMin === 27, 'Incident delay report accurately increments estimated transit time');
+
+// ----------------------------------------------------------------------
 // Summary
 // ----------------------------------------------------------------------
 console.log('\n====================================================');

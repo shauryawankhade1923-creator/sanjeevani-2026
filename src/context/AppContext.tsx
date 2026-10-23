@@ -7,7 +7,8 @@ import {
   LogEvent, 
   EventSeverity,
   AidCategory,
-  RiderStatus
+  RiderStatus,
+  DelayReport
 } from '../types';
 import { 
   getFreshInitialDonations, 
@@ -31,6 +32,17 @@ interface AppContextType {
   timeMultiplier: number;
   setTimeMultiplier: (multiplier: number) => void;
   
+  // Rider Session & Workflow
+  currentRiderId: string;
+  setCurrentRiderId: (id: string) => void;
+  updateRiderDutyStatus: (riderId: string, status: 'AVAILABLE' | 'OFFLINE') => { success: boolean; message: string };
+  acceptAssignment: (taskId: string, riderId: string) => { success: boolean; message: string };
+  declineAssignment: (taskId: string, riderId: string, reason?: string) => { success: boolean; message: string };
+  confirmArrivalAtPickup: (taskId: string) => { success: boolean; message: string };
+  reportDelayOrProblem: (taskId: string, delay: { reason: DelayReport['reason']; notes: string; estimatedDelayMinutes: number }) => { success: boolean; message: string };
+  confirmArrivalAtDestination: (taskId: string) => { success: boolean; message: string };
+  completeDeliveryWithProof: (taskId: string, proof: { recipientName: string; notes?: string; photoUrl?: string }) => { success: boolean; message: string };
+
   // Actions
   createDonation: (data: Omit<Donation, 'id' | 'remainingQuantity' | 'status' | 'createdAt'>) => Donation;
   updateDonation: (donationId: string, updates: Partial<Donation>) => { success: boolean; message: string };
@@ -133,6 +145,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [scenarioStep, setScenarioStep] = useState<number>(0);
   const [scenarioNotes, setScenarioNotes] = useState<string>('');
   const [pendingRerouteTask, setPendingRerouteTask] = useState<DeliveryTask | null>(null);
+  const [currentRiderId, setCurrentRiderId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_currentRiderId`);
+      if (saved) return saved;
+    } catch (e) {}
+    return 'vol-01'; // Default: Ramesh Kumar
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_currentRiderId`, currentRiderId);
+    } catch (e) {}
+  }, [currentRiderId]);
 
   // References to eliminate React closure staleness in timeouts and intervals
   const donationsRef = useRef(donations);
@@ -726,7 +751,211 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   };
 
-  // Confirm Pickup
+  // Courier Duty Status Toggle
+  const updateRiderDutyStatus = (riderId: string, status: 'AVAILABLE' | 'OFFLINE'): { success: boolean; message: string } => {
+    const rider = volunteersRef.current.find(v => v.id === riderId);
+    if (!rider) return { success: false, message: 'Courier not found in registry.' };
+
+    if (status === 'OFFLINE') {
+      const activeTask = tasksRef.current.find(
+        t => t.riderId === riderId && (t.status === 'CLAIMED' || t.status === 'ACCEPTED' || t.status === 'ARRIVED_PICKUP' || t.status === 'IN_TRANSIT' || t.status === 'ARRIVED_DESTINATION')
+      );
+      if (activeTask) {
+        return {
+          success: false,
+          message: 'Cannot go OFFLINE while an active assignment or delivery is in progress. Please complete or reassign your delivery first.'
+        };
+      }
+    }
+
+    setVolunteers(prev =>
+      prev.map(v => v.id === riderId ? { 
+        ...v, 
+        status, 
+        responsiveness: status === 'AVAILABLE' ? 'ACTIVE' : v.responsiveness, 
+        lastPingTime: new Date().toISOString() 
+      } : v)
+    );
+
+    addLogEvent(
+      'INFO',
+      'SYSTEM',
+      `Courier Duty Status Changed`,
+      `Courier ${rider.name} marked duty status as ${status === 'AVAILABLE' ? 'ONLINE (Ready for Dispatches)' : 'OFFLINE (Unavailable)'}.`,
+      { riderId, status }
+    );
+
+    return {
+      success: true,
+      message: `Duty status updated to ${status === 'AVAILABLE' ? 'ONLINE' : 'OFFLINE'}.`
+    };
+  };
+
+  // Courier Accept Assignment
+  const acceptAssignment = (taskId: string, riderId: string): { success: boolean; message: string } => {
+    const task = tasksRef.current.find(t => t.id === taskId);
+    if (!task) return { success: false, message: 'Assignment not found.' };
+
+    if (task.riderId !== riderId) {
+      return { success: false, message: 'Unauthorized: This assignment is reserved for another courier.' };
+    }
+
+    if (task.status !== 'CLAIMED') {
+      return { success: false, message: `Task is already ${task.status}. Cannot accept again.` };
+    }
+
+    const rider = volunteersRef.current.find(v => v.id === riderId);
+    const donation = donationsRef.current.find(d => d.id === task.donationId);
+
+    // Provide 20-minute operational window for pickup upon explicit acceptance
+    const claimExpiresAt = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: 'ACCEPTED',
+              acceptedAt: new Date().toISOString(),
+              claimExpiresAt
+            }
+          : t
+      )
+    );
+
+    setVolunteers(prev =>
+      prev.map(v =>
+        v.id === riderId
+          ? { ...v, status: 'RESERVED', activeTaskId: taskId, responsiveness: 'ACTIVE', lastPingTime: new Date().toISOString() }
+          : v
+      )
+    );
+
+    addLogEvent(
+      'INFO',
+      'DISPATCH',
+      `Assignment Accepted by Courier`,
+      `Courier ${rider?.name ?? riderId} accepted Task #${task.id.slice(-6)} (${task.quantity} meals from ${donation?.donorName ?? 'Donor'}). Proceeding to collection.`,
+      { taskId, riderId }
+    );
+
+    return { success: true, message: 'Assignment accepted! Please proceed to pickup location.' };
+  };
+
+  // Courier Decline Assignment (Triggers Coordinator Reassignment Workflow)
+  const declineAssignment = (taskId: string, riderId: string, reason?: string): { success: boolean; message: string } => {
+    const task = tasksRef.current.find(t => t.id === taskId);
+    if (!task) return { success: false, message: 'Assignment not found.' };
+
+    if (task.riderId !== riderId) {
+      return { success: false, message: 'Unauthorized: This assignment does not belong to you.' };
+    }
+
+    if (task.status !== 'CLAIMED' && task.status !== 'ACCEPTED') {
+      return { success: false, message: `Cannot decline a delivery that is already ${task.status}.` };
+    }
+
+    const rider = volunteersRef.current.find(v => v.id === riderId);
+
+    // Release donation reservation
+    setDonations(prev =>
+      prev.map(d => {
+        if (d.id === task.donationId) {
+          const newRem = d.remainingQuantity + task.quantity;
+          return {
+            ...d,
+            remainingQuantity: newRem,
+            status: newRem === d.totalQuantity ? 'AVAILABLE' : 'PARTIALLY_RESERVED'
+          };
+        }
+        return d;
+      })
+    );
+
+    // Release committed shelter capacity
+    setShelters(prev =>
+      prev.map(s => {
+        if (s.id === task.targetShelterId) {
+          return {
+            ...s,
+            committedCapacity: Math.max(0, s.committedCapacity - task.quantity)
+          };
+        }
+        return s;
+      })
+    );
+
+    // Cancel task
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: 'CANCELLED',
+              rerouteReason: `Declined by courier: ${reason || 'Courier declined assignment'}`
+            }
+          : t
+      )
+    );
+
+    // Free rider
+    setVolunteers(prev =>
+      prev.map(v =>
+        v.id === riderId
+          ? { ...v, status: 'AVAILABLE', activeTaskId: undefined }
+          : v
+      )
+    );
+
+    addLogEvent(
+      'WARNING',
+      'DISPATCH',
+      `Assignment Declined by Courier`,
+      `Courier ${rider?.name ?? riderId} declined Task #${task.id.slice(-6)} (${task.quantity} meals). Released back to coordinator urgent queue. Reason: ${reason || 'Courier unavailable'}.`,
+      { taskId, riderId, reason }
+    );
+
+    return {
+      success: true,
+      message: 'Assignment declined. Payload released back to coordinator queue for reassignment.'
+    };
+  };
+
+  // Courier Confirm Arrival at Pickup
+  const confirmArrivalAtPickup = (taskId: string): { success: boolean; message: string } => {
+    const task = tasksRef.current.find(t => t.id === taskId);
+    if (!task) return { success: false, message: 'Assignment not found.' };
+
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: 'ARRIVED_PICKUP',
+              arrivedPickupAt: new Date().toISOString()
+            }
+          : t
+      )
+    );
+
+    setVolunteers(prev =>
+      prev.map(v =>
+        v.id === task.riderId ? { ...v, lastPingTime: new Date().toISOString(), responsiveness: 'ACTIVE' } : v
+      )
+    );
+
+    addLogEvent(
+      'INFO',
+      'DISPATCH',
+      `Courier Arrived at Pickup`,
+      `Courier reached pickup location for Task #${task.id.slice(-6)}. Ready for handover verification.`,
+      { taskId }
+    );
+
+    return { success: true, message: 'Arrival at donor pickup logged. Please verify handover and cargo condition.' };
+  };
+
+  // Confirm Pickup Handover & Departure
   const confirmPickup = (taskId: string) => {
     const task = tasksRef.current.find((t) => t.id === taskId);
     if (!task) return;
@@ -734,14 +963,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setTasks((prev) =>
       prev.map((t) =>
         t.id === taskId
-          ? { ...t, status: 'IN_TRANSIT', pickedUpAt: new Date().toISOString() }
+          ? { 
+              ...t, 
+              status: 'IN_TRANSIT', 
+              pickedUpAt: t.pickedUpAt || new Date().toISOString(),
+              inTransitAt: new Date().toISOString() 
+            }
           : t
       )
     );
 
     setVolunteers((prev) =>
       prev.map((v) =>
-        v.id === task.riderId ? { ...v, status: 'IN_TRANSIT', lastPingTime: new Date().toISOString() } : v
+        v.id === task.riderId ? { ...v, status: 'IN_TRANSIT', lastPingTime: new Date().toISOString(), responsiveness: 'ACTIVE' } : v
       )
     );
 
@@ -754,9 +988,176 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       'INFO',
       'DISPATCH',
       `Pickup Confirmed: Task #${task.id.slice(-6)}`,
-      `Rider ${rider?.name ?? 'Volunteer'} verified handover at donor site. Aid cargo (${task.quantity} units) is now IN TRANSIT.`,
+      `Courier ${rider?.name ?? 'Volunteer'} verified handover at donor site. Aid cargo (${task.quantity} units) is now IN TRANSIT.`,
       { taskId }
     );
+  };
+
+  // Courier Report Delay or Operational Problem
+  const reportDelayOrProblem = (
+    taskId: string,
+    delay: { reason: DelayReport['reason']; notes: string; estimatedDelayMinutes: number }
+  ): { success: boolean; message: string } => {
+    const task = tasksRef.current.find(t => t.id === taskId);
+    if (!task) return { success: false, message: 'Assignment not found.' };
+
+    const delayReport: DelayReport = {
+      reason: delay.reason,
+      notes: delay.notes,
+      reportedAt: new Date().toISOString(),
+      estimatedDelayMinutes: delay.estimatedDelayMinutes
+    };
+
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === taskId
+          ? {
+              ...t,
+              delayReport,
+              estimatedTransitMinutes: t.estimatedTransitMinutes + delay.estimatedDelayMinutes
+            }
+          : t
+      )
+    );
+
+    const rider = volunteersRef.current.find(v => v.id === task.riderId);
+    const reasonLabels = {
+      TRAFFIC: 'Traffic / Congestion',
+      VEHICLE_BREAKDOWN: 'Vehicle Breakdown',
+      PICKUP_UNAVAILABLE: 'Donor Unreachable / Pickup Failure',
+      DESTINATION_UNAVAILABLE: 'Shelter Unreachable / Closed',
+      BAD_WEATHER: 'Inclement Weather',
+      OTHER: 'Field Impediment'
+    };
+    const label = reasonLabels[delay.reason] || delay.reason;
+
+    const severity: EventSeverity = (delay.reason === 'DESTINATION_UNAVAILABLE' || delay.reason === 'VEHICLE_BREAKDOWN' || delay.reason === 'PICKUP_UNAVAILABLE')
+      ? 'CRITICAL'
+      : 'WARNING';
+
+    addLogEvent(
+      severity,
+      'DISPATCH',
+      `Courier Incident Report: ${label}`,
+      `Courier ${rider?.name ?? 'Rider'} reported ${label} on Task #${task.id.slice(-6)} (+${delay.estimatedDelayMinutes}m delay). Notes: "${delay.notes}". Relief coordinator alerted.`,
+      { taskId, delayReport }
+    );
+
+    return {
+      success: true,
+      message: `Incident reported (+${delay.estimatedDelayMinutes} mins). Relief coordinator has been notified.`
+    };
+  };
+
+  // Courier Confirm Arrival at Destination
+  const confirmArrivalAtDestination = (taskId: string): { success: boolean; message: string } => {
+    const task = tasksRef.current.find(t => t.id === taskId);
+    if (!task) return { success: false, message: 'Assignment not found.' };
+
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: 'ARRIVED_DESTINATION',
+              arrivedDestinationAt: new Date().toISOString()
+            }
+          : t
+      )
+    );
+
+    setVolunteers(prev =>
+      prev.map(v =>
+        v.id === task.riderId ? { ...v, lastPingTime: new Date().toISOString(), responsiveness: 'ACTIVE' } : v
+      )
+    );
+
+    addLogEvent(
+      'INFO',
+      'DISPATCH',
+      `Courier Arrived at Destination Shelter`,
+      `Courier reached destination shelter for Task #${task.id.slice(-6)}. Ready for receiver verification and proof submission.`,
+      { taskId }
+    );
+
+    return { success: true, message: 'Arrived at shelter! Please obtain receiver signoff and submit delivery proof.' };
+  };
+
+  // Complete Delivery with Proof Verification
+  const completeDeliveryWithProof = (
+    taskId: string,
+    proof: { recipientName: string; notes?: string; photoUrl?: string }
+  ): { success: boolean; message: string } => {
+    if (!proof.recipientName || proof.recipientName.trim().length === 0) {
+      return { success: false, message: 'Shelter representative or receiver name is mandatory to complete delivery.' };
+    }
+
+    const task = tasksRef.current.find(t => t.id === taskId);
+    if (!task) return { success: false, message: 'Assignment not found.' };
+
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: 'DELIVERED',
+              deliveredAt: new Date().toISOString(),
+              proofRecipientName: proof.recipientName.trim(),
+              proofNotes: proof.notes?.trim(),
+              proofPhotoUrl: proof.photoUrl
+            }
+          : t
+      )
+    );
+
+    setVolunteers(prev =>
+      prev.map(v =>
+        v.id === task.riderId
+          ? { ...v, status: 'AVAILABLE', activeTaskId: undefined, lastPingTime: new Date().toISOString(), responsiveness: 'ACTIVE' }
+          : v
+      )
+    );
+
+    setShelters(prev =>
+      prev.map(s => {
+        if (s.id === task.targetShelterId) {
+          const newCommitted = Math.max(0, s.committedCapacity - task.quantity);
+          const newOccupancy = Math.min(s.maxCapacity, s.currentOccupancy + task.quantity);
+          return {
+            ...s,
+            committedCapacity: newCommitted,
+            currentOccupancy: newOccupancy,
+            status: newOccupancy >= s.maxCapacity ? 'CAPACITY_REACHED' : s.status
+          };
+        }
+        return s;
+      })
+    );
+
+    setDonations(prev =>
+      prev.map(d => {
+        if (d.id === task.donationId) {
+          return { ...d, status: 'DELIVERED' };
+        }
+        return d;
+      })
+    );
+
+    const shelter = sheltersRef.current.find(s => s.id === task.targetShelterId);
+    const rider = volunteersRef.current.find(v => v.id === task.riderId);
+
+    addLogEvent(
+      'SUCCESS',
+      'DISPATCH',
+      `Delivery Proof Verified & Handover Complete`,
+      `Courier ${rider?.name ?? 'Rider'} delivered ${task.quantity} units to ${shelter?.name ?? 'Shelter'}. Received by ${proof.recipientName}. Zero spoilage recorded!`,
+      { taskId, quantity: task.quantity, recipientName: proof.recipientName, shelter: shelter?.name }
+    );
+
+    return {
+      success: true,
+      message: `Delivery completed successfully! Handover verified by ${proof.recipientName}.`
+    };
   };
 
   // Confirm Delivery Handover
@@ -1290,6 +1691,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         events,
         activeTab,
         setActiveTab,
+        currentRiderId,
+        setCurrentRiderId,
+        updateRiderDutyStatus,
+        acceptAssignment,
+        declineAssignment,
+        confirmArrivalAtPickup,
+        reportDelayOrProblem,
+        confirmArrivalAtDestination,
+        completeDeliveryWithProof,
         selectedDonationId,
         setSelectedDonationId,
         timeMultiplier,
