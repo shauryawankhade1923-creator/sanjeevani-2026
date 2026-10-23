@@ -53,6 +53,7 @@ interface AppContextType {
   runScenarioB: () => void;
   runScenarioC: () => void;
   runScenarioD: () => void;
+  runScenarioShelterFull: () => void;
 
   // Active Scenario Progress
   activeScenario: 'NONE' | 'SCENARIO_A' | 'SCENARIO_B' | 'SCENARIO_C' | 'SCENARIO_D';
@@ -1262,6 +1263,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     scenarioTimeoutsRef.current.push(t1);
   };
 
+  // Scenario: Shelter Becomes Full (Capacity Saturation & Dynamic Spillover)
+  const runScenarioShelterFull = () => {
+    resetAllData();
+    setActiveScenario('SCENARIO_C');
+    setScenarioStep(1);
+    setScenarioNotes('Scenario Initialized: Shelter Alpha reaches 100% capacity (150/150). System shifts to backup shelters.');
+
+    updateShelterStatus('sh-01', 'CAPACITY_REACHED', 150);
+    
+    addLogEvent(
+      'WARNING',
+      'SHELTER',
+      'Shelter Alpha Capacity Saturated',
+      'Occupancy reached 150/150 meals. All incoming surplus diverted to secondary recipient (Shelter Beta).'
+    );
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -1295,6 +1313,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         runScenarioB,
         runScenarioC,
         runScenarioD,
+        runScenarioShelterFull,
         activeScenario,
         scenarioStep,
         scenarioNotes,

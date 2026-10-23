@@ -131,7 +131,7 @@ export interface LogEvent {
   id: string;
   timestamp: string;
   severity: EventSeverity;
-  category: 'DONATION' | 'DISPATCH' | 'GHOST_WATCH' | 'REROUTE' | 'SAFETY' | 'SYSTEM';
+  category: 'DONATION' | 'DISPATCH' | 'GHOST_WATCH' | 'REROUTE' | 'SAFETY' | 'SYSTEM' | 'SHELTER';
   title: string;
   message: string;
   metadata?: Record<string, any>;
