@@ -1,6 +1,6 @@
 import { Donation, Shelter, Volunteer, LogEvent } from '../types';
 
-export const INITIAL_DONATIONS: Donation[] = [
+export const getFreshInitialDonations = (): Donation[] => [
   {
     id: 'don-01',
     donorName: 'The Grand Regal Banquet Hall',
@@ -54,14 +54,14 @@ export const INITIAL_DONATIONS: Donation[] = [
   }
 ];
 
-export const INITIAL_SHELTERS: Shelter[] = [
+export const getFreshInitialShelters = (): Shelter[] => [
   {
     id: 'sh-01',
     name: 'Shelter Alpha (Central Community Camp)',
     locationName: 'Paharganj Civic Centre',
     coordinates: { lat: 28.6380, lng: 77.2150, address: 'Paharganj Civic Complex' },
-    maxCapacity: 120,
-    currentOccupancy: 60,
+    maxCapacity: 150,
+    currentOccupancy: 50,
     committedCapacity: 0,
     acceptsCategories: ['COOKED_MEALS', 'BABY_FORMULA', 'RAW_RATIONS', 'PACKAGED_FOOD'],
     hasCleanWater: true,
@@ -76,8 +76,8 @@ export const INITIAL_SHELTERS: Shelter[] = [
     name: 'Shelter Beta (North Night Shelter)',
     locationName: 'ISBT North Yard',
     coordinates: { lat: 28.6650, lng: 77.2300, address: 'ISBT North Ground' },
-    maxCapacity: 80,
-    currentOccupancy: 30,
+    maxCapacity: 120,
+    currentOccupancy: 40,
     committedCapacity: 0,
     acceptsCategories: ['COOKED_MEALS', 'RAW_RATIONS', 'PACKAGED_FOOD', 'BABY_FORMULA'],
     hasCleanWater: true,
@@ -127,7 +127,7 @@ export const INITIAL_SHELTERS: Shelter[] = [
     locationName: 'Chandni Chowk Ward 7',
     coordinates: { lat: 28.6540, lng: 77.2320, address: 'Old City Center' },
     maxCapacity: 50,
-    currentOccupancy: 50, // FULL
+    currentOccupancy: 50, // FULL (0 available)
     committedCapacity: 0,
     acceptsCategories: ['COOKED_MEALS'],
     hasCleanWater: true,
@@ -140,7 +140,7 @@ export const INITIAL_SHELTERS: Shelter[] = [
   }
 ];
 
-export const INITIAL_VOLUNTEERS: Volunteer[] = [
+export const getFreshInitialVolunteers = (): Volunteer[] => [
   {
     id: 'vol-01',
     name: 'Rajesh Kumar',
@@ -208,7 +208,7 @@ export const INITIAL_VOLUNTEERS: Volunteer[] = [
   }
 ];
 
-export const INITIAL_LOG_EVENTS: LogEvent[] = [
+export const getFreshInitialLogEvents = (): LogEvent[] => [
   {
     id: 'ev-01',
     timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
@@ -226,3 +226,9 @@ export const INITIAL_LOG_EVENTS: LogEvent[] = [
     message: 'The Grand Regal Banquet registered 180 cooked meals. Expiry deadline set to 75 minutes. Accelerated watchdog active.',
   }
 ];
+
+// Fallback constants
+export const INITIAL_DONATIONS = getFreshInitialDonations();
+export const INITIAL_SHELTERS = getFreshInitialShelters();
+export const INITIAL_VOLUNTEERS = getFreshInitialVolunteers();
+export const INITIAL_LOG_EVENTS = getFreshInitialLogEvents();

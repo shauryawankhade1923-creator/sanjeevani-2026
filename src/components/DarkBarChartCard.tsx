@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { getRemainingShelfLifeMinutes } from '../utils/engine';
 
 export const DarkBarChartCard: React.FC = () => {
-  const { donations, setActiveTab } = useApp();
+  const { donations, setSelectedDonationId, setActiveTab } = useApp();
 
   const barData = [
     { label: '10', height: 45, isHighlight: false },
@@ -110,7 +110,10 @@ export const DarkBarChartCard: React.FC = () => {
         </div>
 
         <button
-          onClick={() => setActiveTab('dispatch')}
+          onClick={() => {
+            if (urgentDonation) setSelectedDonationId(urgentDonation.id);
+            setActiveTab('dispatch');
+          }}
           className="inline-flex items-center justify-center space-x-1.5 bg-[#E5F940] hover:bg-[#d6eb34] text-slate-900 text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm shrink-0"
         >
           <Send className="w-3.5 h-3.5" />

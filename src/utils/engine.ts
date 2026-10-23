@@ -26,7 +26,7 @@ export function validateAidDependencies(category: AidCategory, shelter: Shelter)
   if (category === 'BABY_FORMULA' && !shelter.hasCleanWater) {
     return {
       passed: false,
-      reason: `REJECTED: Infant formula requires verified clean potable water for safe mixing. ${shelter.name} reports clean water is currently unavailable.`
+      reason: `REJECTED: Infant formula requires verified clean potable water for safe reconstitution. ${shelter.name} reports clean water is currently unavailable.`
     };
   }
 
@@ -34,7 +34,7 @@ export function validateAidDependencies(category: AidCategory, shelter: Shelter)
   if (category === 'RAW_RATIONS' && !shelter.hasCookingFuel) {
     return {
       passed: false,
-      reason: `REJECTED: Raw ration kits require cooking fuel & prep kitchen. ${shelter.name} does not have operational cooking facilities.`
+      reason: `REJECTED: Raw ration kits require cooking fuel & operational kitchen. ${shelter.name} does not have cooking facilities.`
     };
   }
 
@@ -50,7 +50,7 @@ export function validateAidDependencies(category: AidCategory, shelter: Shelter)
   if (!shelter.acceptsCategories.includes(category)) {
     return {
       passed: false,
-      reason: `REJECTED: ${shelter.name} does not accept ${category.replace('_', ' ')} based on municipal registration.`
+      reason: `REJECTED: ${shelter.name} does not accept ${category.replace('_', ' ')} based on municipal intake policy.`
     };
   }
 
@@ -72,7 +72,7 @@ export function validateDispatchFeasibility(
   // Expiry check
   const remainingMinutes = getRemainingShelfLifeMinutes(donation.expiresAt, now);
   if (remainingMinutes <= 0) {
-    failures.push(`CRITICAL: Aid batch has already expired (${Math.abs(remainingMinutes)} mins ago). Spoilage safety policy prohibits dispatch.`);
+    failures.push(`CRITICAL: Aid batch has already expired (${Math.abs(remainingMinutes)} mins ago). Spoilage safety policy strictly prohibits dispatch.`);
     return { isValid: false, failures, warnings };
   }
 
@@ -85,9 +85,11 @@ export function validateDispatchFeasibility(
 
   // Capacity check
   const availableCapacity = shelter.maxCapacity - (shelter.currentOccupancy + shelter.committedCapacity);
-  if (availableCapacity < requestedQuantity) {
+  if (availableCapacity <= 0) {
+    failures.push(`Shelter ${shelter.name} has 0 remaining capacity.`);
+  } else if (availableCapacity < requestedQuantity) {
     failures.push(
-      `Insufficient capacity at ${shelter.name}: Needs ${requestedQuantity} capacity, but only ${Math.max(0, availableCapacity)} units remain available.`
+      `Insufficient capacity at ${shelter.name}: Requested ${requestedQuantity} units, but only ${availableCapacity} remaining available.`
     );
   }
 
@@ -125,7 +127,7 @@ export function validateDispatchFeasibility(
 export function rankSheltersForDispatch(
   donation: Donation,
   shelters: Shelter[],
-  quantity: number,
+  requestedQuantity: number = 0,
   now: Date = new Date()
 ): DispatchScoreBreakdown[] {
   const remainingMinutes = getRemainingShelfLifeMinutes(donation.expiresAt, now);
@@ -145,8 +147,11 @@ export function rankSheltersForDispatch(
     }
 
     const availableCapacity = shelter.maxCapacity - (shelter.currentOccupancy + shelter.committedCapacity);
-    if (availableCapacity < quantity) {
-      ineligibilityReasons.push(`Short on capacity (available: ${Math.max(0, availableCapacity)} / needed: ${quantity})`);
+    if (availableCapacity <= 0) {
+      ineligibilityReasons.push(`Zero intake space available`);
+    } else if (requestedQuantity > 0 && availableCapacity < requestedQuantity) {
+      // If a specific single quantity was requested and it exceeds available
+      ineligibilityReasons.push(`Needs ${requestedQuantity} space, but only ${availableCapacity} available`);
     }
 
     const depCheck = validateAidDependencies(donation.category, shelter);
@@ -164,7 +169,7 @@ export function rankSheltersForDispatch(
     // Proximity score (0 to 40)
     const proximityScore = Math.max(0, 40 - (distanceKm * 2.5));
     // Capacity headroom score (0 to 30)
-    const capacityScore = availableCapacity >= quantity ? Math.min(30, (availableCapacity / shelter.maxCapacity) * 30) : 0;
+    const capacityScore = availableCapacity > 0 ? Math.min(30, (availableCapacity / shelter.maxCapacity) * 30) : 0;
     // Expiry feasibility score (0 to 30)
     const expirySafetyScore = feasibleWithinExpiry ? Math.min(30, ((remainingMinutes - totalTimeRequired) / 60) * 30) : 0;
 
@@ -175,7 +180,7 @@ export function rankSheltersForDispatch(
 
     let explanation = '';
     if (isEligible) {
-      explanation = `Optimal choice: ${distanceKm} km away (${transitEtaMinutes}m ETA). Leaves ${remainingMinutes - totalTimeRequired}m safety margin. Available capacity: ${availableCapacity}.`;
+      explanation = `Optimal destination: ${distanceKm} km away (~${transitEtaMinutes}m ETA). Leaves ${remainingMinutes - totalTimeRequired}m safety margin. Available capacity: ${availableCapacity} units.`;
     } else {
       explanation = `Ineligible: ${ineligibilityReasons.join('; ')}`;
     }
@@ -217,7 +222,7 @@ export function calculateBatchSplit(
   totalNeeded: number,
   availableRiders: Volunteer[]
 ): SplitPlanResult {
-  // Sort riders by capacity descending
+  // Filter active and available riders, sorted by capacity descending
   const eligibleRiders = availableRiders
     .filter((r) => r.status === 'AVAILABLE' && r.responsiveness === 'ACTIVE')
     .sort((a, b) => b.carryCapacity - a.carryCapacity);
@@ -228,11 +233,13 @@ export function calculateBatchSplit(
   for (const rider of eligibleRiders) {
     if (remaining <= 0) break;
     const allocation = Math.min(remaining, rider.carryCapacity);
-    plan.push({
-      rider,
-      allocatedQuantity: allocation
-    });
-    remaining -= allocation;
+    if (allocation > 0) {
+      plan.push({
+        rider,
+        allocatedQuantity: allocation
+      });
+      remaining -= allocation;
+    }
   }
 
   const totalAllocated = totalNeeded - remaining;
@@ -243,7 +250,7 @@ export function calculateBatchSplit(
     remainingUnallocated: remaining,
     plan,
     reason: remaining > 0 
-      ? `Insufficient total rider capacity: Need ${totalNeeded} units, but available fleet can only carry ${totalAllocated} units in this trip.`
+      ? `Insufficient total rider capacity: Requested ${totalNeeded} units, but available fleet can only carry ${totalAllocated} units.`
       : undefined
   };
 }
@@ -258,10 +265,8 @@ export function findRerouteAlternatives(
   allShelters: Shelter[],
   now: Date = new Date()
 ): DispatchScoreBreakdown[] {
-  // Evaluate from Rider's current location to candidate shelters
   const remainingMinutes = getRemainingShelfLifeMinutes(donation.expiresAt, now);
-
-  const candidateShelters = allShelters.filter(s => s.id !== task.originalShelterId);
+  const candidateShelters = allShelters.filter((s) => s.id !== task.targetShelterId);
 
   return candidateShelters.map((shelter) => {
     const ineligibilityReasons: string[] = [];

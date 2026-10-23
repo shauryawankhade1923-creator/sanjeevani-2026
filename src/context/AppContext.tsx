@@ -10,10 +10,10 @@ import {
   RiderStatus
 } from '../types';
 import { 
-  INITIAL_DONATIONS, 
-  INITIAL_SHELTERS, 
-  INITIAL_VOLUNTEERS, 
-  INITIAL_LOG_EVENTS 
+  getFreshInitialDonations, 
+  getFreshInitialShelters, 
+  getFreshInitialVolunteers, 
+  getFreshInitialLogEvents 
 } from '../data/initialData';
 import { calculateBatchSplit, getRemainingShelfLifeMinutes, findRerouteAlternatives } from '../utils/engine';
 import { calculateDistanceKm, estimateTransitMinutes } from '../utils/geo';
@@ -26,6 +26,8 @@ interface AppContextType {
   events: LogEvent[];
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  selectedDonationId: string;
+  setSelectedDonationId: (id: string) => void;
   timeMultiplier: number;
   setTimeMultiplier: (multiplier: number) => void;
   
@@ -34,6 +36,7 @@ interface AppContextType {
   quickCreate180Meals: () => Donation;
   claimTask: (donationId: string, riderId: string, shelterId: string, quantity: number) => { success: boolean; error?: string };
   splitAndDispatch: (donationId: string, shelterId: string, requestedRiderIds?: string[]) => { success: boolean; taskIds: string[]; message: string };
+  smartMultiShelterDispatch: (donationId: string) => { success: boolean; taskIds: string[]; message: string };
   confirmPickup: (taskId: string) => void;
   confirmDelivery: (taskId: string) => void;
   simulateGhostRider: (riderId: string) => void;
@@ -53,52 +56,104 @@ interface AppContextType {
   activeScenario: 'NONE' | 'SCENARIO_A' | 'SCENARIO_B' | 'SCENARIO_C' | 'SCENARIO_D';
   scenarioStep: number;
   scenarioNotes: string;
+  
+  // Active Reroute Conflict Alert (if a shelter closes mid-transit)
+  pendingRerouteTask: DeliveryTask | null;
+  dismissPendingReroute: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_KEY = 'sanjeevani_platform_state_v1';
+const LOCAL_STORAGE_KEY = 'sanjeevani_platform_state_v2';
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Load state or use initial seed
+  // Load state or use fresh dynamic seed
   const [donations, setDonations] = useState<Donation[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_donations`);
-    return saved ? JSON.parse(saved) : INITIAL_DONATIONS;
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_donations`);
+      if (saved) {
+        const parsed: Donation[] = JSON.parse(saved);
+        // If saved donations have all expired, re-seed with fresh baseline
+        const hasActive = parsed.some(d => getRemainingShelfLifeMinutes(d.expiresAt) > 0);
+        if (hasActive) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse saved donations:', e);
+    }
+    return getFreshInitialDonations();
   });
 
   const [shelters, setShelters] = useState<Shelter[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_shelters`);
-    return saved ? JSON.parse(saved) : INITIAL_SHELTERS;
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_shelters`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse saved shelters:', e);
+    }
+    return getFreshInitialShelters();
   });
 
   const [volunteers, setVolunteers] = useState<Volunteer[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_volunteers`);
-    return saved ? JSON.parse(saved) : INITIAL_VOLUNTEERS;
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_volunteers`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse saved volunteers:', e);
+    }
+    return getFreshInitialVolunteers();
   });
 
   const [tasks, setTasks] = useState<DeliveryTask[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_tasks`);
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_tasks`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse saved tasks:', e);
+    }
+    return [];
   });
 
   const [events, setEvents] = useState<LogEvent[]>(() => {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_events`);
-    return saved ? JSON.parse(saved) : INITIAL_LOG_EVENTS;
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_events`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse saved events:', e);
+    }
+    return getFreshInitialLogEvents();
   });
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [selectedDonationId, setSelectedDonationId] = useState<string>('don-01');
   const [timeMultiplier, setTimeMultiplier] = useState<number>(1);
   const [activeScenario, setActiveScenario] = useState<AppContextType['activeScenario']>('NONE');
   const [scenarioStep, setScenarioStep] = useState<number>(0);
   const [scenarioNotes, setScenarioNotes] = useState<string>('');
+  const [pendingRerouteTask, setPendingRerouteTask] = useState<DeliveryTask | null>(null);
+
+  // References to eliminate React closure staleness in timeouts and intervals
+  const donationsRef = useRef(donations);
+  const sheltersRef = useRef(shelters);
+  const volunteersRef = useRef(volunteers);
+  const tasksRef = useRef(tasks);
+  const scenarioTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
+
+  useEffect(() => { donationsRef.current = donations; }, [donations]);
+  useEffect(() => { sheltersRef.current = shelters; }, [shelters]);
+  useEffect(() => { volunteersRef.current = volunteers; }, [volunteers]);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   // Persist to local storage
   useEffect(() => {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_donations`, JSON.stringify(donations));
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_shelters`, JSON.stringify(shelters));
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_volunteers`, JSON.stringify(volunteers));
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_tasks`, JSON.stringify(tasks));
-    localStorage.setItem(`${LOCAL_STORAGE_KEY}_events`, JSON.stringify(events));
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_donations`, JSON.stringify(donations));
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_shelters`, JSON.stringify(shelters));
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_volunteers`, JSON.stringify(volunteers));
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_tasks`, JSON.stringify(tasks));
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_events`, JSON.stringify(events));
+    } catch (e) {
+      console.warn('Error saving to localStorage:', e);
+    }
   }, [donations, shelters, volunteers, tasks, events]);
 
   // Log Event Helper
@@ -118,28 +173,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       message,
       metadata
     };
-    setEvents((prev) => [newEvent, ...prev.slice(0, 150)]); // keep recent 150
+    setEvents((prev) => [newEvent, ...prev.slice(0, 150)]);
   };
 
   // Automated Watchdog ticker (Ghost detection & Expiry check)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
+      const currentTasks = tasksRef.current;
+      const currentVolunteers = volunteersRef.current;
+      const currentDonations = donationsRef.current;
 
-      // Check Ghost Reservations for CLAIMED tasks
-      tasks.forEach((task) => {
+      // 1. Check Ghost Reservations for CLAIMED tasks
+      currentTasks.forEach((task) => {
         if (task.status === 'CLAIMED') {
           const deadline = new Date(task.claimExpiresAt).getTime();
           if (now >= deadline) {
-            // Rider is ghost/unresponsive!
-            const rider = volunteers.find((v) => v.id === task.riderId);
-            if (rider && rider.responsiveness !== 'UNRESPONSIVE') {
-              // Mark rider unresponsive and reclaim automatically
+            const rider = currentVolunteers.find((v) => v.id === task.riderId);
+            if (rider && rider.status === 'RESERVED') {
               addLogEvent(
                 'CRITICAL',
                 'GHOST_WATCH',
-                'Ghost Reservation Detected',
-                `Volunteer ${rider.name} failed to confirm pickup for Task #${task.id.slice(-6)} within deadline. Auto-reclaiming reserved meals to prevent spoilage.`,
+                'Ghost Reservation Timeout Detected',
+                `Volunteer ${rider.name} failed to confirm pickup for Task #${task.id.slice(-6)} within deadline. Auto-reclaiming reserved payload to prevent spoilage.`,
                 { taskId: task.id, riderId: rider.id }
               );
               reclaimGhostTask(task.id, true);
@@ -148,8 +204,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       });
 
-      // Check Spoilage for available donations
-      donations.forEach((donation) => {
+      // 2. Check Spoilage for available donations
+      currentDonations.forEach((donation) => {
         if (donation.status === 'AVAILABLE' || donation.status === 'PARTIALLY_RESERVED') {
           const remMin = getRemainingShelfLifeMinutes(donation.expiresAt);
           if (remMin <= 0) {
@@ -160,7 +216,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               'CRITICAL',
               'DONATION',
               'Perishable Batch Expired',
-              `Batch "${donation.itemTitle}" has passed its safe consumption deadline. Locked from dispatch.`,
+              `Batch "${donation.itemTitle}" has crossed its safe consumption deadline. Locked from dispatch to enforce health standards.`,
               { donationId: donation.id }
             );
           }
@@ -169,7 +225,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [tasks, volunteers, donations]);
+  }, [timeMultiplier]);
 
   // Create Donation
   const createDonation = (data: Omit<Donation, 'id' | 'remainingQuantity' | 'status' | 'createdAt'>): Donation => {
@@ -182,6 +238,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     setDonations((prev) => [newDonation, ...prev]);
+    setSelectedDonationId(newDonation.id);
+
     addLogEvent(
       'INFO',
       'DONATION',
@@ -206,18 +264,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       coordinates: { lat: 28.6139, lng: 77.2090, address: 'MG Road Gate 2' },
       preparedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 75 * 60 * 1000).toISOString(), // 75 mins remaining
-      storageRequirement: 'Insulated hot bags; consume within 75 minutes',
+      storageRequirement: 'Insulated hot carriers; consume within 75 minutes',
       specialInstructions: 'Separated into insulated meal trays of 10. Direct gate pickup.',
       status: 'AVAILABLE',
       createdAt: new Date().toISOString()
     };
 
     setDonations((prev) => [quickDonation, ...prev]);
+    setSelectedDonationId(quickDonation.id);
+
     addLogEvent(
       'WARNING',
       'DONATION',
       'High-Urgency 180-Meal Batch Created',
-      `Registered 180 cooked meals with 75 minutes remaining shelf life. Multi-rider batch splitting required.`,
+      `Registered 180 cooked meals with 75 minutes remaining safe shelf life. Multi-rider batch splitting armed.`,
       { donationId: quickDonation.id, quantity: 180, expiryMinutes: 75 }
     );
     return quickDonation;
@@ -230,12 +290,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     shelterId: string,
     quantity: number
   ): { success: boolean; error?: string } => {
-    const donation = donations.find((d) => d.id === donationId);
-    const rider = volunteers.find((v) => v.id === riderId);
-    const shelter = shelters.find((s) => s.id === shelterId);
+    const currentDonations = donationsRef.current;
+    const currentVolunteers = volunteersRef.current;
+    const currentShelters = sheltersRef.current;
+
+    const donation = currentDonations.find((d) => d.id === donationId);
+    const rider = currentVolunteers.find((v) => v.id === riderId);
+    const shelter = currentShelters.find((s) => s.id === shelterId);
 
     if (!donation || !rider || !shelter) {
       return { success: false, error: 'Invalid donation, rider, or shelter reference' };
+    }
+
+    if (quantity <= 0) {
+      return { success: false, error: 'Quantity must be greater than zero.' };
     }
 
     if (quantity > donation.remainingQuantity) {
@@ -246,12 +314,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, error: `Quantity (${quantity}) exceeds rider carrying capacity (${rider.carryCapacity})` };
     }
 
+    if (rider.status !== 'AVAILABLE') {
+      return { success: false, error: `Rider ${rider.name} is already assigned to an active delivery.` };
+    }
+
     const availableShelterCap = shelter.maxCapacity - (shelter.currentOccupancy + shelter.committedCapacity);
     if (quantity > availableShelterCap) {
       return { success: false, error: `Shelter capacity exceeded. Only ${availableShelterCap} space available.` };
     }
 
-    // Calculate transit and dynamic claim TTL (30s in accelerated demo)
+    // Dynamic claim TTL (30s accelerated)
     const dist = calculateDistanceKm(rider.coordinates, shelter.coordinates);
     const transitMin = estimateTransitMinutes(dist);
     const claimTtlSeconds = Math.max(15, Math.floor(35 / timeMultiplier));
@@ -270,7 +342,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       estimatedTransitMinutes: transitMin
     };
 
-    // Update States
     setTasks((prev) => [newTask, ...prev]);
 
     setDonations((prev) =>
@@ -314,14 +385,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { success: true };
   };
 
-  // Multi-Rider Atomic Batch Splitting Dispatch
+  // Multi-Rider Atomic Batch Splitting Dispatch for a selected shelter
   const splitAndDispatch = (
     donationId: string,
     shelterId: string,
     requestedRiderIds?: string[]
   ): { success: boolean; taskIds: string[]; message: string } => {
-    const donation = donations.find((d) => d.id === donationId);
-    const shelter = shelters.find((s) => s.id === shelterId);
+    const currentDonations = donationsRef.current;
+    const currentShelters = sheltersRef.current;
+    const currentVolunteers = volunteersRef.current;
+
+    const donation = currentDonations.find((d) => d.id === donationId);
+    const shelter = currentShelters.find((s) => s.id === shelterId);
 
     if (!donation || !shelter) {
       return { success: false, taskIds: [], message: 'Donation or shelter not found' };
@@ -331,8 +406,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return { success: false, taskIds: [], message: 'No remaining quantity to dispatch in this batch.' };
     }
 
-    // Filter available riders
-    let candidateRiders = volunteers.filter(
+    let candidateRiders = currentVolunteers.filter(
       (v) => v.status === 'AVAILABLE' && v.responsiveness === 'ACTIVE'
     );
 
@@ -350,15 +424,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const splitResult = calculateBatchSplit(dispatchTargetQuantity, candidateRiders);
 
     if (splitResult.plan.length === 0) {
-      return { success: false, taskIds: [], message: 'No eligible riders available with capacity.' };
+      return { success: false, taskIds: [], message: 'No eligible riders available with free carrying capacity.' };
     }
 
     const createdTaskIds: string[] = [];
     const claimTtlSeconds = Math.max(25, Math.floor(45 / timeMultiplier));
-
-    // Execute split
-    const updatedTasks: DeliveryTask[] = [];
-    const assignedRiderIds = new Set<string>();
+    const newTasks: DeliveryTask[] = [];
 
     splitResult.plan.forEach((item, index) => {
       const taskId = `task-split-${Date.now().toString().slice(-4)}-${index + 1}`;
@@ -379,14 +450,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         estimatedTransitMinutes: transitMin
       };
 
-      updatedTasks.push(task);
+      newTasks.push(task);
       createdTaskIds.push(taskId);
-      assignedRiderIds.add(item.rider.id);
     });
 
-    setTasks((prev) => [...updatedTasks, ...prev]);
+    setTasks((prev) => [...newTasks, ...prev]);
 
-    // Update Donation Remaining
     setDonations((prev) =>
       prev.map((d) => {
         if (d.id === donationId) {
@@ -401,16 +470,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       })
     );
 
-    // Update Riders
     setVolunteers((prev) =>
       prev.map((v) => {
-        const matchingPlan = splitResult.plan.find((p) => p.rider.id === v.id);
-        if (matchingPlan) {
-          const assignedTask = updatedTasks.find((t) => t.riderId === v.id);
+        const assignedTask = newTasks.find((t) => t.riderId === v.id);
+        if (assignedTask) {
           return {
             ...v,
             status: 'RESERVED',
-            activeTaskId: assignedTask?.id,
+            activeTaskId: assignedTask.id,
             responsiveness: 'ACTIVE'
           };
         }
@@ -418,7 +485,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       })
     );
 
-    // Update Shelter committed capacity
     setShelters((prev) =>
       prev.map((s) =>
         s.id === shelterId
@@ -438,13 +504,126 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return {
       success: true,
       taskIds: createdTaskIds,
-      message: `Dispatched ${splitResult.totalAllocated} meals across ${splitResult.plan.length} riders.`
+      message: `Dispatched ${splitResult.totalAllocated} meals across ${splitResult.plan.length} riders to ${shelter.name}.`
     };
   };
 
-  // Confirm Pickup (Transitions from CLAIMED to IN_TRANSIT)
+  // Smart Multi-Shelter & Fleet Dispatch (Dispatches all 180 units across shelters and riders)
+  const smartMultiShelterDispatch = (donationId: string): { success: boolean; taskIds: string[]; message: string } => {
+    const donation = donationsRef.current.find((d) => d.id === donationId);
+    if (!donation || donation.remainingQuantity <= 0) {
+      return { success: false, taskIds: [], message: 'No remaining quantity to dispatch in this batch.' };
+    }
+
+    const availableRiders = [...volunteersRef.current.filter(v => v.status === 'AVAILABLE' && v.responsiveness === 'ACTIVE')];
+    const eligibleShelters = [...sheltersRef.current.filter(s => s.status === 'ACCEPTING')];
+
+    let remainingToDispatch = donation.remainingQuantity;
+    const allCreatedTasks: DeliveryTask[] = [];
+    const claimTtlSeconds = Math.max(30, Math.floor(45 / timeMultiplier));
+
+    // Shelter Alpha (target: up to 100) & Shelter Beta (target: up to 80)
+    for (const shelter of eligibleShelters) {
+      if (remainingToDispatch <= 0 || availableRiders.length === 0) break;
+
+      const shelterAvailableSpace = shelter.maxCapacity - (shelter.currentOccupancy + shelter.committedCapacity);
+      if (shelterAvailableSpace <= 0) continue;
+
+      const targetForShelter = Math.min(remainingToDispatch, shelterAvailableSpace);
+      const split = calculateBatchSplit(targetForShelter, availableRiders);
+
+      if (split.plan.length > 0) {
+        split.plan.forEach((item, idx) => {
+          const taskId = `task-smart-${Date.now().toString().slice(-4)}-${allCreatedTasks.length + 1}`;
+          const dist = calculateDistanceKm(donation.coordinates, shelter.coordinates);
+          const transitMin = estimateTransitMinutes(dist);
+
+          const task: DeliveryTask = {
+            id: taskId,
+            donationId,
+            riderId: item.rider.id,
+            originalShelterId: shelter.id,
+            targetShelterId: shelter.id,
+            quantity: item.allocatedQuantity,
+            status: 'CLAIMED',
+            reservedAt: new Date().toISOString(),
+            claimExpiresAt: new Date(Date.now() + claimTtlSeconds * 1000).toISOString(),
+            isRerouted: false,
+            estimatedTransitMinutes: transitMin
+          };
+
+          allCreatedTasks.push(task);
+          // Remove used rider from available pool
+          const rIndex = availableRiders.findIndex(r => r.id === item.rider.id);
+          if (rIndex >= 0) availableRiders.splice(rIndex, 1);
+        });
+
+        remainingToDispatch -= split.totalAllocated;
+      }
+    }
+
+    if (allCreatedTasks.length === 0) {
+      return { success: false, taskIds: [], message: 'No compatible capacity found across shelters and fleet.' };
+    }
+
+    const totalAllocated = allCreatedTasks.reduce((acc, t) => acc + t.quantity, 0);
+
+    setTasks((prev) => [...allCreatedTasks, ...prev]);
+
+    setDonations((prev) =>
+      prev.map((d) => {
+        if (d.id === donationId) {
+          const newRem = Math.max(0, d.remainingQuantity - totalAllocated);
+          return {
+            ...d,
+            remainingQuantity: newRem,
+            status: newRem === 0 ? 'FULLY_RESERVED' : 'PARTIALLY_RESERVED'
+          };
+        }
+        return d;
+      })
+    );
+
+    setVolunteers((prev) =>
+      prev.map((v) => {
+        const assignedTask = allCreatedTasks.find((t) => t.riderId === v.id);
+        if (assignedTask) {
+          return { ...v, status: 'RESERVED', activeTaskId: assignedTask.id, responsiveness: 'ACTIVE' };
+        }
+        return v;
+      })
+    );
+
+    setShelters((prev) =>
+      prev.map((s) => {
+        const allocatedToShelter = allCreatedTasks
+          .filter((t) => t.targetShelterId === s.id)
+          .reduce((acc, t) => acc + t.quantity, 0);
+        if (allocatedToShelter > 0) {
+          return { ...s, committedCapacity: s.committedCapacity + allocatedToShelter };
+        }
+        return s;
+      })
+    );
+
+    addLogEvent(
+      'SUCCESS',
+      'DISPATCH',
+      `Smart Multi-Shelter Knapsack Dispatch (${totalAllocated} Units)`,
+      `Successfully allocated ${totalAllocated} units across ${allCreatedTasks.length} riders to multiple verified shelters without loss or capacity violation.`,
+      { taskCount: allCreatedTasks.length, totalAllocated }
+    );
+
+    return {
+      success: true,
+      taskIds: allCreatedTasks.map(t => t.id),
+      message: `Successfully dispatched ${totalAllocated} meals across ${allCreatedTasks.length} riders.`
+    };
+  };
+
+  // Confirm Pickup
   const confirmPickup = (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId);
+    const task = tasksRef.current.find((t) => t.id === taskId);
     if (!task) return;
 
     setTasks((prev) =>
@@ -465,19 +644,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       prev.map((d) => (d.id === task.donationId ? { ...d, status: 'IN_TRANSIT' } : d))
     );
 
-    const rider = volunteers.find((v) => v.id === task.riderId);
+    const rider = volunteersRef.current.find((v) => v.id === task.riderId);
     addLogEvent(
       'INFO',
       'DISPATCH',
       `Pickup Confirmed: Task #${task.id.slice(-6)}`,
-      `Rider ${rider?.name ?? 'Volunteer'} verified handover at donor site. Aid cargo is now IN TRANSIT.`,
+      `Rider ${rider?.name ?? 'Volunteer'} verified handover at donor site. Aid cargo (${task.quantity} units) is now IN TRANSIT.`,
       { taskId }
     );
   };
 
-  // Confirm Delivery Handover at Shelter
+  // Confirm Delivery Handover
   const confirmDelivery = (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId);
+    const task = tasksRef.current.find((t) => t.id === taskId);
     if (!task) return;
 
     setTasks((prev) =>
@@ -488,7 +667,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       )
     );
 
-    // Free Rider
     setVolunteers((prev) =>
       prev.map((v) =>
         v.id === task.riderId
@@ -497,7 +675,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       )
     );
 
-    // Update Shelter: deduct committed, add to occupancy
     setShelters((prev) =>
       prev.map((s) => {
         if (s.id === task.targetShelterId) {
@@ -514,30 +691,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       })
     );
 
-    // Update Donation Status
+    // If all tasks for this donation are delivered and 0 remaining
     setDonations((prev) =>
       prev.map((d) => {
         if (d.id === task.donationId) {
-          // If no remaining quantity and all other tasks delivered
           return { ...d, status: 'DELIVERED' };
         }
         return d;
       })
     );
 
-    const shelter = shelters.find((s) => s.id === task.targetShelterId);
+    const shelter = sheltersRef.current.find((s) => s.id === task.targetShelterId);
     addLogEvent(
       'SUCCESS',
       'DISPATCH',
       `Delivery Successfully Completed!`,
-      `Safely handed over ${task.quantity} meals at ${shelter?.name}. Zero spoilage achieved.`,
+      `Safely handed over ${task.quantity} meals at ${shelter?.name}. Zero spoilage recorded.`,
       { taskId, quantity: task.quantity, shelter: shelter?.name }
     );
   };
 
-  // Simulate Ghost Rider (Rider goes dark / stalled)
+  // Simulate Ghost Rider
   const simulateGhostRider = (riderId: string) => {
-    const rider = volunteers.find((v) => v.id === riderId);
+    const rider = volunteersRef.current.find((v) => v.id === riderId);
     if (!rider) return;
 
     setVolunteers((prev) =>
@@ -548,30 +724,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       )
     );
 
+    // Accelerate the claim deadline on their active task so the watchdog expires immediately or in a few seconds
+    const activeTask = tasksRef.current.find((t) => t.riderId === riderId && t.status === 'CLAIMED');
+    if (activeTask) {
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === activeTask.id
+            ? { ...t, claimExpiresAt: new Date(Date.now() + 3000).toISOString() }
+            : t
+        )
+      );
+    }
+
     addLogEvent(
       'WARNING',
       'GHOST_WATCH',
       `Volunteer Unresponsive: ${rider.name}`,
-      `Rider ${rider.name} stopped transmitting GPS heartbeats. Initiating stall watchdog countdown.`,
+      `Rider ${rider.name} stopped transmitting GPS heartbeats. Accelerated dead-man stall watchdog active (auto-reclaim in 3s).`,
       { riderId }
     );
   };
 
-  // Reclaim Ghost Reservation and Restore Quantities
+  // Reclaim Ghost Task with full state consistency
   const reclaimGhostTask = (taskId: string, autoReassign: boolean = true) => {
-    const task = tasks.find((t) => t.id === taskId);
+    const task = tasksRef.current.find((t) => t.id === taskId);
     if (!task || task.status === 'DELIVERED' || task.status === 'RECLAIMED') return;
 
-    const rider = volunteers.find((v) => v.id === task.riderId);
-    const donation = donations.find((d) => d.id === task.donationId);
-    const shelter = shelters.find((s) => s.id === task.targetShelterId);
+    const rider = volunteersRef.current.find((v) => v.id === task.riderId);
+    const donation = donationsRef.current.find((d) => d.id === task.donationId);
+    const shelter = sheltersRef.current.find((s) => s.id === task.targetShelterId);
 
-    // Mark task as RECLAIMED
+    // 1. Mark task as RECLAIMED
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, status: 'RECLAIMED' } : t))
     );
 
-    // Release and penalize ghost rider
+    // 2. Release & penalize rider
     setVolunteers((prev) =>
       prev.map((v) =>
         v.id === task.riderId
@@ -586,7 +774,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       )
     );
 
-    // Restore Shelter committed capacity
+    // 3. Release Shelter committed capacity
     if (shelter) {
       setShelters((prev) =>
         prev.map((s) =>
@@ -597,15 +785,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       );
     }
 
-    // Restore Donation remaining quantity
+    // 4. Restore Donation remaining quantity
+    let restoredQuantity = task.quantity;
     if (donation) {
       setDonations((prev) =>
         prev.map((d) => {
           if (d.id === donation.id) {
-            const restoredRem = d.remainingQuantity + task.quantity;
+            const newRem = d.remainingQuantity + task.quantity;
             return {
               ...d,
-              remainingQuantity: restoredRem,
+              remainingQuantity: newRem,
               status: 'AVAILABLE'
             };
           }
@@ -622,27 +811,69 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       { taskId, reclaimedQuantity: task.quantity }
     );
 
-    // Auto-reassign if requested and alternative rider exists
+    // 5. Auto-reassign to standby rider if requested
     if (autoReassign && donation && shelter) {
-      const standbyRiders = volunteers.filter(
+      const currentStandbyRiders = volunteersRef.current.filter(
         (v) => v.id !== task.riderId && v.status === 'AVAILABLE' && v.responsiveness === 'ACTIVE' && v.carryCapacity >= task.quantity
       );
 
-      if (standbyRiders.length > 0) {
-        const replacementRider = standbyRiders[0];
-        claimTask(donation.id, replacementRider.id, shelter.id, task.quantity);
+      if (currentStandbyRiders.length > 0) {
+        const replacementRider = currentStandbyRiders[0];
+        const claimTtl = Math.max(25, Math.floor(45 / timeMultiplier));
+        const reassignedTaskId = `task-reassign-${Date.now().toString().slice(-4)}`;
+
+        const reassignedTask: DeliveryTask = {
+          id: reassignedTaskId,
+          donationId: donation.id,
+          riderId: replacementRider.id,
+          originalShelterId: shelter.id,
+          targetShelterId: shelter.id,
+          quantity: task.quantity,
+          status: 'CLAIMED',
+          reservedAt: new Date().toISOString(),
+          claimExpiresAt: new Date(Date.now() + claimTtl * 1000).toISOString(),
+          isRerouted: false,
+          estimatedTransitMinutes: estimateTransitMinutes(calculateDistanceKm(replacementRider.coordinates, shelter.coordinates))
+        };
+
+        setTasks((prev) => [reassignedTask, ...prev]);
+
+        setDonations((prev) =>
+          prev.map((d) =>
+            d.id === donation.id
+              ? { ...d, remainingQuantity: Math.max(0, d.remainingQuantity - task.quantity), status: 'PARTIALLY_RESERVED' }
+              : d
+          )
+        );
+
+        setVolunteers((prev) =>
+          prev.map((v) =>
+            v.id === replacementRider.id
+              ? { ...v, status: 'RESERVED', activeTaskId: reassignedTaskId, responsiveness: 'ACTIVE' }
+              : v
+          )
+        );
+
+        setShelters((prev) =>
+          prev.map((s) =>
+            s.id === shelter.id
+              ? { ...s, committedCapacity: s.committedCapacity + task.quantity }
+              : s
+          )
+        );
+
         addLogEvent(
           'SUCCESS',
           'DISPATCH',
           `Auto-Reassigned to ${replacementRider.name}`,
-          `Successfully reassigned ${task.quantity} meals to standby rider ${replacementRider.name} without manual intervention.`,
-          { newRider: replacementRider.name }
+          `Successfully reassigned ${task.quantity} meals to standby rider ${replacementRider.name} without manual administrator delay.`,
+          { newRider: replacementRider.name, taskId: reassignedTaskId }
         );
       }
     }
   };
 
-  // Update Shelter Status / Simulate Closure
+  // Update Shelter Status & Detect Mid-Transit Conflict
   const updateShelterStatus = (
     shelterId: string,
     status: Shelter['status'],
@@ -662,7 +893,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       })
     );
 
-    const shelter = shelters.find((s) => s.id === shelterId);
+    const shelter = sheltersRef.current.find((s) => s.id === shelterId);
     addLogEvent(
       status === 'ACCEPTING' ? 'INFO' : 'WARNING',
       'SAFETY',
@@ -670,24 +901,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       `Operational status set to ${status}. Occupancy: ${newOccupancy ?? shelter?.currentOccupancy}/${shelter?.maxCapacity}.`,
       { shelterId, status }
     );
+
+    // Check if any in-transit delivery is heading to this now-closed/full shelter
+    if (status === 'CLOSED' || status === 'CAPACITY_REACHED') {
+      const inTransitTasks = tasksRef.current.filter(
+        (t) => t.targetShelterId === shelterId && t.status === 'IN_TRANSIT'
+      );
+
+      if (inTransitTasks.length > 0) {
+        const affectedTask = inTransitTasks[0];
+        setPendingRerouteTask(affectedTask);
+        addLogEvent(
+          'CRITICAL',
+          'REROUTE',
+          'IN-TRANSIT CONFLICT DETECTED!',
+          `Task #${affectedTask.id.slice(-6)} (${affectedTask.quantity} meals) is currently IN TRANSIT to ${shelter?.name}, which is now ${status}. Immediate rerouting required!`,
+          { taskId: affectedTask.id, shelter: shelter?.name }
+        );
+      }
+    }
+  };
+
+  const dismissPendingReroute = () => {
+    setPendingRerouteTask(null);
   };
 
   // Dynamic Rerouting Engine
   const rerouteTask = (taskId: string, newShelterId: string, reason: string): boolean => {
-    const task = tasks.find((t) => t.id === taskId);
+    const task = tasksRef.current.find((t) => t.id === taskId);
     if (!task) return false;
 
-    const oldShelter = shelters.find((s) => s.id === task.targetShelterId);
-    const newShelter = shelters.find((s) => s.id === newShelterId);
-    const rider = volunteers.find((v) => v.id === task.riderId);
-    const donation = donations.find((d) => d.id === task.donationId);
+    const oldShelter = sheltersRef.current.find((s) => s.id === task.targetShelterId);
+    const newShelter = sheltersRef.current.find((s) => s.id === newShelterId);
+    const rider = volunteersRef.current.find((v) => v.id === task.riderId);
+    const donation = donationsRef.current.find((d) => d.id === task.donationId);
 
     if (!newShelter || !rider || !donation) return false;
 
-    // Safety and capacity check on new shelter
     const availableCap = newShelter.maxCapacity - (newShelter.currentOccupancy + newShelter.committedCapacity);
     if (availableCap < task.quantity) {
-      addLogEvent('CRITICAL', 'REROUTE', 'Reroute Failed', `Cannot reroute to ${newShelter.name}: insufficient capacity.`);
+      addLogEvent('CRITICAL', 'REROUTE', 'Reroute Failed', `Cannot reroute to ${newShelter.name}: insufficient space (${availableCap} free / ${task.quantity} needed).`);
       return false;
     }
 
@@ -704,7 +957,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       })
     );
 
-    // Update task
     const newDist = calculateDistanceKm(rider.coordinates, newShelter.coordinates);
     const newTransit = estimateTransitMinutes(newDist);
 
@@ -722,6 +974,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       )
     );
 
+    setPendingRerouteTask(null);
+
     addLogEvent(
       'SUCCESS',
       'REROUTE',
@@ -733,17 +987,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return true;
   };
 
-  // Reset Everything to Clean Demo State
+  // Reset Everything Cleanly
   const resetAllData = () => {
-    setDonations(INITIAL_DONATIONS);
-    setShelters(INITIAL_SHELTERS);
-    setVolunteers(INITIAL_VOLUNTEERS);
+    // Clear any pending timeouts
+    scenarioTimeoutsRef.current.forEach(clearTimeout);
+    scenarioTimeoutsRef.current = [];
+
+    const freshDonations = getFreshInitialDonations();
+    const freshShelters = getFreshInitialShelters();
+    const freshVolunteers = getFreshInitialVolunteers();
+    const freshEvents = getFreshInitialLogEvents();
+
+    setDonations(freshDonations);
+    setShelters(freshShelters);
+    setVolunteers(freshVolunteers);
     setTasks([]);
-    setEvents(INITIAL_LOG_EVENTS);
+    setEvents(freshEvents);
+    setSelectedDonationId(freshDonations[0].id);
     setActiveScenario('NONE');
     setScenarioStep(0);
     setScenarioNotes('Demo state completely restored to fresh initial parameters.');
-    addLogEvent('INFO', 'SYSTEM', 'Demo Environment Reset', 'All volunteer locks, shelter occupancies, and mission logs restored to baseline.');
+    setPendingRerouteTask(null);
+
+    addLogEvent('INFO', 'SYSTEM', 'Demo Environment Reset', 'All volunteer locks, shelter commitments, and simulation states restored to fresh baseline.');
   };
 
   // ----------------------------------------------------
@@ -757,19 +1023,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setScenarioStep(1);
     setScenarioNotes('Scenario A Initialized: Ingesting 180 cooked meals expiring in 75 mins.');
 
-    // Step 1: Create 180 meals
     const batch = quickCreate180Meals();
 
-    setTimeout(() => {
+    const t1 = setTimeout(() => {
       setScenarioStep(2);
-      setScenarioNotes('Executing multi-rider atomic split across available 40-cap two-wheelers...');
-      // Execute split for Shelter Alpha
-      const result = splitAndDispatch(batch.id, 'sh-01');
+      setScenarioNotes('Executing multi-rider atomic split across available 40-cap two-wheelers and verified shelters...');
+      
+      // Execute multi-shelter split
+      const result = smartMultiShelterDispatch(batch.id);
       if (result.success) {
         setScenarioStep(3);
-        setScenarioNotes(`Split complete! 180 meals allocated: 40 + 40 + 40 + 40 + 20 across 5 riders without loss.`);
+        setScenarioNotes(`Split complete! 180 meals allocated: 40 + 40 + 20 (Shelter Alpha) + 40 + 40 (Shelter Beta) across 5 riders without loss.`);
       }
     }, 1200);
+
+    scenarioTimeoutsRef.current.push(t1);
   };
 
   // Scenario B: Ghost Reservation
@@ -779,26 +1047,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setScenarioStep(1);
     setScenarioNotes('Scenario B Initialized: Rider Rajesh Kumar claims 40 meals for Shelter Beta.');
 
-    // Step 1: Claim task
     const claimRes = claimTask('don-01', 'vol-01', 'sh-02', 40);
     if (!claimRes.success) return;
 
-    // Step 2: Simulate rider becoming unresponsive
-    setTimeout(() => {
+    const t1 = setTimeout(() => {
       setScenarioStep(2);
-      setScenarioNotes('Rider Rajesh Kumar stopped transmitting heartbeats. Accelerated dead-man timer active.');
+      setScenarioNotes('Rider Rajesh Kumar stopped transmitting heartbeats. Accelerated dead-man stall watchdog active.');
       simulateGhostRider('vol-01');
-    }, 1500);
 
-    // Step 3: Trigger auto-reclaim & re-dispatch
-    setTimeout(() => {
-      setScenarioStep(3);
-      setScenarioNotes('Ghost deadline elapsed. Reclaiming 40 meals and reassigning to standby rider Priya Sharma.');
-      const task = tasks.find((t) => t.riderId === 'vol-01' && t.status === 'CLAIMED');
-      if (task) {
-        reclaimGhostTask(task.id, true);
-      }
-    }, 3500);
+      const t2 = setTimeout(() => {
+        setScenarioStep(3);
+        setScenarioNotes('Ghost deadline elapsed. Reclaiming 40 meals and reassigning to standby rider Priya Sharma.');
+        
+        const currentTasks = tasksRef.current;
+        const task = currentTasks.find((t) => t.riderId === 'vol-01' && t.status === 'CLAIMED');
+        if (task) {
+          reclaimGhostTask(task.id, true);
+        }
+      }, 3200);
+
+      scenarioTimeoutsRef.current.push(t2);
+    }, 1200);
+
+    scenarioTimeoutsRef.current.push(t1);
   };
 
   // Scenario C: Shelter Closure Mid-Delivery
@@ -808,43 +1079,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setScenarioStep(1);
     setScenarioNotes('Scenario C Initialized: Rajesh Kumar picking up 40 meals for Shelter Alpha.');
 
-    // Claim and start transit
     const claimRes = claimTask('don-01', 'vol-01', 'sh-01', 40);
-    
-    setTimeout(() => {
+
+    const t1 = setTimeout(() => {
       // Find created task and confirm pickup
-      setTasks((prev) => {
-        const found = prev.find((t) => t.riderId === 'vol-01');
-        if (found) {
-          confirmPickup(found.id);
-        }
-        return prev;
-      });
+      const currentTasks = tasksRef.current;
+      const found = currentTasks.find((t) => t.riderId === 'vol-01');
+      if (found) {
+        confirmPickup(found.id);
+      }
 
       setScenarioStep(2);
       setScenarioNotes('Cargo is IN TRANSIT. Simulating emergency: Local citizen drops food at Shelter Alpha, filling it to 100%.');
 
-      setTimeout(() => {
+      const t2 = setTimeout(() => {
         // Close Shelter Alpha
-        updateShelterStatus('sh-01', 'CAPACITY_REACHED', 120);
+        updateShelterStatus('sh-01', 'CAPACITY_REACHED', 150);
         setScenarioStep(3);
         setScenarioNotes('Conflict detected! System actively searching for nearest open eligible shelter...');
 
-        setTimeout(() => {
+        const t3 = setTimeout(() => {
           // Dynamic reroute to Shelter Beta
-          setTasks((prev) => {
-            const inTransitTask = prev.find((t) => t.riderId === 'vol-01' && t.status === 'IN_TRANSIT');
-            if (inTransitTask) {
-              rerouteTask(inTransitTask.id, 'sh-02', 'Shelter Alpha filled by local offline donation.');
-            }
-            return prev;
-          });
+          const inTransitTask = tasksRef.current.find((t) => t.riderId === 'vol-01' && t.status === 'IN_TRANSIT');
+          if (inTransitTask) {
+            rerouteTask(inTransitTask.id, 'sh-02', 'Shelter Alpha filled by local offline donation.');
+          }
           setScenarioStep(4);
           setScenarioNotes('Reroute successful! In-transit rider diverted to Shelter Beta (+4 mins ETA). Spoilage averted.');
         }, 1500);
 
+        scenarioTimeoutsRef.current.push(t3);
       }, 1500);
+
+      scenarioTimeoutsRef.current.push(t2);
     }, 800);
+
+    scenarioTimeoutsRef.current.push(t1);
   };
 
   // Scenario D: Unsafe Aid Dependency
@@ -854,7 +1124,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setScenarioStep(1);
     setScenarioNotes('Scenario D Initialized: Testing hard safety rules & prerequisite validator.');
 
-    setTimeout(() => {
+    const t1 = setTimeout(() => {
       setScenarioStep(2);
       setScenarioNotes('Attempting to dispatch Infant Formula to Shelter Gamma (Lacks Potable Water)...');
       
@@ -866,7 +1136,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         { aid: 'BABY_FORMULA', destination: 'Shelter Gamma' }
       );
 
-      setTimeout(() => {
+      const t2 = setTimeout(() => {
         setScenarioStep(3);
         setScenarioNotes('Attempting to dispatch Raw Rations to Shelter Delta (Lacks Cooking Facilities)...');
 
@@ -879,9 +1149,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         );
 
         setScenarioStep(4);
-        setScenarioNotes('Safety Verification Complete: Both hazardous dispatches were prevented by policy rules.');
+        setScenarioNotes('Safety Verification Complete: Both hazardous dispatches were prevented by policy rules without changing any shelter or donation quantities.');
       }, 1500);
+
+      scenarioTimeoutsRef.current.push(t2);
     }, 1000);
+
+    scenarioTimeoutsRef.current.push(t1);
   };
 
   return (
@@ -894,12 +1168,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         events,
         activeTab,
         setActiveTab,
+        selectedDonationId,
+        setSelectedDonationId,
         timeMultiplier,
         setTimeMultiplier,
         createDonation,
         quickCreate180Meals,
         claimTask,
         splitAndDispatch,
+        smartMultiShelterDispatch,
         confirmPickup,
         confirmDelivery,
         simulateGhostRider,
@@ -914,7 +1191,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         runScenarioD,
         activeScenario,
         scenarioStep,
-        scenarioNotes
+        scenarioNotes,
+        pendingRerouteTask,
+        dismissPendingReroute
       }}
     >
       {children}

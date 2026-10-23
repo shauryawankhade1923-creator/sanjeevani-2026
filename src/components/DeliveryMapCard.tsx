@@ -140,9 +140,18 @@ export const DeliveryMapCard: React.FC = () => {
             <div className="absolute left-1.5 top-3.5 bottom-0 w-0.5 -ml-[1px] bg-slate-300" />
             <div className="flex-1 flex items-start justify-between">
               <div>
-                <p className="font-bold text-slate-900">In Transit</p>
+                <div className="flex items-center space-x-1.5">
+                  <p className="font-bold text-slate-900">In Transit</p>
+                  {activeTask?.isRerouted && (
+                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800">
+                      Rerouted
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] text-slate-500">
-                  On the way to {targetShelter?.name || 'destination'}.
+                  {activeTask?.isRerouted
+                    ? `Diverted to ${targetShelter?.name || 'destination'}`
+                    : `On the way to ${targetShelter?.name || 'destination'}.`}
                 </p>
               </div>
               <span className="text-[10px] font-mono text-slate-400">01:42 PM</span>
