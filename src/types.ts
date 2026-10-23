@@ -11,7 +11,8 @@ export type DonationStatus =
   | 'FULLY_RESERVED'
   | 'IN_TRANSIT'
   | 'DELIVERED'
-  | 'EXPIRED';
+  | 'EXPIRED'
+  | 'CANCELLED';
 
 export type RiderStatus = 
   | 'AVAILABLE'
@@ -49,17 +50,28 @@ export interface Donation {
   id: string;
   donorName: string;
   donorPhone: string;
+  organizationName?: string;
+  organizationType?: 'RESTAURANT' | 'HOTEL' | 'CATERER' | 'COLLEGE_CANTEEN' | 'SUPERMARKET' | 'COMMUNITY_KITCHEN' | 'OTHER';
   itemTitle: string;
   category: AidCategory;
+  foodType?: 'VEGETARIAN' | 'NON_VEGETARIAN' | 'VEGAN' | 'DRY_RATION' | 'INFANT_CARE' | 'COLD_MED';
+  unit?: 'meals' | 'packs' | 'kg' | 'boxes' | 'units';
   totalQuantity: number;
   remainingQuantity: number;
   pickupLocation: string;
+  pickupWindow?: string;
   coordinates: Coordinates;
   preparedAt: string; // ISO string
   expiresAt: string; // ISO string
   storageRequirement: string;
+  temperatureRequirement?: 'AMBIENT' | 'HEATED_60C' | 'COLD_2_8C' | 'FROZEN';
+  requiresCleanWater?: boolean;
+  requiresCooking?: boolean;
+  allergenNotes?: string;
+  photoUrl?: string;
   specialInstructions: string;
   status: DonationStatus;
+  cancelledReason?: string;
   createdAt: string;
 }
 

@@ -33,6 +33,8 @@ interface AppContextType {
   
   // Actions
   createDonation: (data: Omit<Donation, 'id' | 'remainingQuantity' | 'status' | 'createdAt'>) => Donation;
+  updateDonation: (donationId: string, updates: Partial<Donation>) => { success: boolean; message: string };
+  cancelDonation: (donationId: string, reason?: string) => { success: boolean; message: string };
   quickCreate180Meals: () => Donation;
   claimTask: (donationId: string, riderId: string, shelterId: string, quantity: number) => { success: boolean; error?: string };
   splitAndDispatch: (donationId: string, shelterId: string, requestedRiderIds?: string[]) => { success: boolean; taskIds: string[]; message: string };
@@ -248,6 +250,108 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       { donationId: newDonation.id }
     );
     return newDonation;
+  };
+
+  // Update Donation (Allowed only prior to transit / delivery)
+  const updateDonation = (donationId: string, updates: Partial<Donation>): { success: boolean; message: string } => {
+    const d = donationsRef.current.find(item => item.id === donationId);
+    if (!d) return { success: false, message: 'Donation not found in records.' };
+
+    if (d.status === 'IN_TRANSIT' || d.status === 'DELIVERED') {
+      return { 
+        success: false, 
+        message: `Modification blocked: Donation is currently in ${d.status.toLowerCase()} status. Core payload and routing are locked.` 
+      };
+    }
+
+    setDonations((prev) => prev.map((item) => {
+      if (item.id === donationId) {
+        return { ...item, ...updates };
+      }
+      return item;
+    }));
+
+    addLogEvent(
+      'INFO',
+      'DONATION',
+      'Donation Record Updated',
+      `Donor modified parameters for batch #${donationId.slice(-6)} (${d.itemTitle}).`,
+      { donationId, updates }
+    );
+
+    return { success: true, message: 'Donation parameters successfully updated.' };
+  };
+
+  // Cancel Donation (Guards against silently dumping in-transit cargo)
+  const cancelDonation = (donationId: string, reason?: string): { success: boolean; message: string } => {
+    const d = donationsRef.current.find(item => item.id === donationId);
+    if (!d) return { success: false, message: 'Donation not found.' };
+
+    // Strict validation: Prevent removing cargo already in transit
+    const relatedTasks = tasksRef.current.filter((t) => t.donationId === donationId);
+    const inTransitTask = relatedTasks.find((t) => t.status === 'IN_TRANSIT' || t.status === 'PICKED_UP');
+    
+    if (inTransitTask || d.status === 'IN_TRANSIT') {
+      return { 
+        success: false, 
+        message: 'Security Violation: Shipment is actively in transit with a field courier. Immediate cancellation blocked to prevent aid abandonment. Please notify municipal operations.' 
+      };
+    }
+    
+    if (d.status === 'DELIVERED') {
+      return { success: false, message: 'Donation has already been fulfilled and delivered to beneficiaries.' };
+    }
+
+    // Release any reserved/claimed tasks and free up couriers & committed shelter space
+    const claimedTasks = relatedTasks.filter((t) => t.status === 'CLAIMED');
+    if (claimedTasks.length > 0) {
+      const riderIdsToRelease = claimedTasks.map((t) => t.riderId);
+      
+      setVolunteers((prev) => prev.map((v) => {
+        if (riderIdsToRelease.includes(v.id)) {
+          return { ...v, status: 'AVAILABLE', activeTaskId: undefined };
+        }
+        return v;
+      }));
+
+      claimedTasks.forEach((t) => {
+        setShelters((prev) => prev.map((s) => {
+          if (s.id === t.targetShelterId) {
+            return { ...s, committedCapacity: Math.max(0, s.committedCapacity - t.quantity) };
+          }
+          return s;
+        }));
+      });
+
+      setTasks((prev) => prev.map((t) => {
+        if (t.donationId === donationId && t.status === 'CLAIMED') {
+          return { ...t, status: 'CANCELLED' };
+        }
+        return t;
+      }));
+    }
+
+    setDonations((prev) => prev.map((item) => {
+      if (item.id === donationId) {
+        return { 
+          ...item, 
+          status: 'CANCELLED', 
+          remainingQuantity: 0,
+          cancelledReason: reason || 'Donor retracted donation before courier departure.' 
+        };
+      }
+      return item;
+    }));
+
+    addLogEvent(
+      'WARNING',
+      'DONATION',
+      'Donation Cancelled by Donor',
+      `Donation #${donationId.slice(-6)} retracted. Any pre-departure courier reservations have been safely released. Reason: ${reason || 'Donor cancellation.'}`,
+      { donationId, reason }
+    );
+
+    return { success: true, message: 'Donation successfully cancelled. Courier reservations released.' };
   };
 
   // Quick 180 Meals Creator (Problem Statement Requirement)
@@ -1173,6 +1277,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         timeMultiplier,
         setTimeMultiplier,
         createDonation,
+        updateDonation,
+        cancelDonation,
         quickCreate180Meals,
         claimTask,
         splitAndDispatch,

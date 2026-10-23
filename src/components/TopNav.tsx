@@ -29,7 +29,7 @@ export const TopNav: React.FC = () => {
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard' },
-    { id: 'donations', label: 'Aid Batches' },
+    { id: 'donations', label: 'Donor Dashboard' },
     { id: 'dispatch', label: 'Dispatch Center' },
     { id: 'volunteers', label: 'Volunteer Fleet' },
     { id: 'shelters', label: 'Shelters & Camps' },
