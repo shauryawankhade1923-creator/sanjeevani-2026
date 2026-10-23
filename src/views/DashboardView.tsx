@@ -17,18 +17,17 @@ import { VehicleCard } from '../components/VehicleCard';
 import { DeliveryMapCard } from '../components/DeliveryMapCard';
 
 export const DashboardView: React.FC = () => {
-  const { quickCreate180Meals, setActiveTab, events } = useApp();
+  const { donations, quickCreate180Meals, setActiveTab, events } = useApp();
   const [selectedTimeframe, setSelectedTimeframe] = useState('Dec 2026');
 
   const handleExportCsv = () => {
-    const csvContent = "data:text/csv;charset=utf-8," + 
-      "ID,Title,Category,Remaining,Total,Status\n" +
-      "don-01,180 Cooked Meals,COOKED_MEALS,180,180,AVAILABLE\n" +
-      "don-02,Infant Nutrition Formula,BABY_FORMULA,30,30,AVAILABLE\n" +
-      "don-03,Raw Grain Rations,RAW_RATIONS,50,50,AVAILABLE";
-    const encodedUri = encodeURI(csvContent);
+    const headers = "ID,Title,Category,Remaining,Total,Status,PickupLocation,ExpiresAt\n";
+    const rows = donations.map(d => 
+      `"${d.id}","${d.itemTitle.replace(/"/g, '""')}","${d.category}",${d.remainingQuantity},${d.totalQuantity},"${d.status}","${d.pickupLocation.replace(/"/g, '""')}","${d.expiresAt}"`
+    ).join("\n");
+    const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(headers + rows);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", csvContent);
     link.setAttribute("download", `sanjeevani_shipments_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();

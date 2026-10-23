@@ -3,7 +3,7 @@ import { Truck, ArrowUpRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export const VehicleCard: React.FC = () => {
-  const { volunteers, tasks } = useApp();
+  const { volunteers, tasks, setActiveTab } = useApp();
 
   const activeRiders = volunteers.filter((v) => v.status === 'IN_TRANSIT' || v.status === 'RESERVED');
   const leadRider = activeRiders[0] || volunteers[0];
@@ -17,7 +17,11 @@ export const VehicleCard: React.FC = () => {
           <Truck className="w-4 h-4 text-slate-600" />
           <h3 className="text-sm font-bold tracking-tight">Delivery Vehicles</h3>
         </div>
-        <button className="w-7 h-7 rounded-full bg-white/70 hover:bg-white flex items-center justify-center text-slate-600 shadow-xs transition">
+        <button 
+          onClick={() => setActiveTab('volunteers')}
+          title="Open Volunteer Fleet Management"
+          className="w-7 h-7 rounded-full bg-white/70 hover:bg-white flex items-center justify-center text-slate-600 shadow-xs transition"
+        >
           <ArrowUpRight className="w-3.5 h-3.5" />
         </button>
       </div>

@@ -12,7 +12,7 @@ import {
 import { useApp } from '../context/AppContext';
 
 export const DeliveryMapCard: React.FC = () => {
-  const { tasks, shelters, volunteers, donations } = useApp();
+  const { tasks, shelters, volunteers, donations, setActiveTab } = useApp();
   const [zoomLevel, setZoomLevel] = useState(1);
 
   const activeTask = tasks.find((t) => t.status === 'IN_TRANSIT' || t.status === 'CLAIMED') || tasks[0];
@@ -21,6 +21,11 @@ export const DeliveryMapCard: React.FC = () => {
 
   const trackingId = activeTask ? `#${activeTask.id.slice(-6).toUpperCase()}-SANJ-829` : '#267972-63-829bm';
   const etaMinutes = activeTask ? activeTask.estimatedTransitMinutes : 14;
+
+  const now = new Date();
+  const timeNowStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const timePriorStr = new Date(now.getTime() - 15 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const timeStartStr = new Date(now.getTime() - 35 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   return (
     <div className="bg-[#DCE7DF] rounded-3xl p-6 border border-[#CADBCF] shadow-xs flex flex-col justify-between h-full min-h-[480px] relative overflow-hidden">
@@ -31,7 +36,11 @@ export const DeliveryMapCard: React.FC = () => {
           <Globe className="w-4 h-4 text-slate-600" />
           <h3 className="text-sm font-bold tracking-tight">Live Delivery Map</h3>
         </div>
-        <button className="w-7 h-7 rounded-full bg-white/70 hover:bg-white flex items-center justify-center text-slate-600 shadow-xs transition">
+        <button 
+          onClick={() => setActiveTab('live')}
+          title="Open Fullscreen Dispatch Map"
+          className="w-7 h-7 rounded-full bg-white/70 hover:bg-white flex items-center justify-center text-slate-600 shadow-xs transition"
+        >
           <ArrowUpRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -154,7 +163,7 @@ export const DeliveryMapCard: React.FC = () => {
                     : `On the way to ${targetShelter?.name || 'destination'}.`}
                 </p>
               </div>
-              <span className="text-[10px] font-mono text-slate-400">01:42 PM</span>
+              <span className="text-[10px] font-mono text-slate-400">{timeNowStr}</span>
             </div>
           </div>
 
@@ -167,7 +176,7 @@ export const DeliveryMapCard: React.FC = () => {
                 <p className="font-medium text-slate-800">In Sorting</p>
                 <p className="text-[11px] text-slate-500">Verified at Grand Regal Banquet.</p>
               </div>
-              <span className="text-[10px] font-mono text-slate-400">11:18 AM</span>
+              <span className="text-[10px] font-mono text-slate-400">{timePriorStr}</span>
             </div>
           </div>
 
@@ -179,7 +188,7 @@ export const DeliveryMapCard: React.FC = () => {
                 <p className="font-medium text-slate-800">Picked Up</p>
                 <p className="text-[11px] text-slate-500">Package collected by {rider?.name || 'Rider'}.</p>
               </div>
-              <span className="text-[10px] font-mono text-slate-400">10:02 AM</span>
+              <span className="text-[10px] font-mono text-slate-400">{timeStartStr}</span>
             </div>
           </div>
 

@@ -3,15 +3,30 @@ import { FileText, ArrowUpRight, TrendingUp } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export const RadialGaugeCard: React.FC = () => {
-  const { donations, tasks } = useApp();
+  const { donations, tasks, setActiveTab } = useApp();
 
   const totalDelivered = tasks
     .filter((t) => t.status === 'DELIVERED')
     .reduce((acc, t) => acc + t.quantity, 0);
 
-  // Generate 28 tick marks in a semi-circle arc (from 180 deg to 0 deg)
+  const totalCreated = donations.reduce((acc, d) => acc + d.totalQuantity, 0);
+  const expiredMeals = donations
+    .filter((d) => d.status === 'EXPIRED')
+    .reduce((acc, d) => acc + d.remainingQuantity, 0);
+
+  const activeInTransit = tasks
+    .filter((t) => t.status === 'IN_TRANSIT' || t.status === 'CLAIMED')
+    .reduce((acc, t) => acc + t.quantity, 0);
+
   const totalTicks = 32;
-  const activeTicks = 24; // 75% active
+  const ratio = totalCreated > 0 
+    ? (totalDelivered + activeInTransit * 0.5) / totalCreated 
+    : 0.5;
+  const activeTicks = Math.min(totalTicks, Math.max(2, Math.round(ratio * totalTicks)));
+
+  const zeroWastePct = totalCreated > 0
+    ? Math.max(0, Math.min(100, Math.round(((totalCreated - expiredMeals) / totalCreated) * 1000) / 10))
+    : 100;
 
   const radius = 80;
   const centerX = 110;
@@ -49,7 +64,11 @@ export const RadialGaugeCard: React.FC = () => {
           <FileText className="w-4 h-4 text-slate-600" />
           <h3 className="text-sm font-bold tracking-tight">Analytic view</h3>
         </div>
-        <button className="w-7 h-7 rounded-full bg-white/70 hover:bg-white flex items-center justify-center text-slate-600 shadow-xs transition">
+        <button 
+          onClick={() => setActiveTab('events')}
+          title="Open Audit Trail"
+          className="w-7 h-7 rounded-full bg-white/70 hover:bg-white flex items-center justify-center text-slate-600 shadow-xs transition"
+        >
           <ArrowUpRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -73,9 +92,11 @@ export const RadialGaugeCard: React.FC = () => {
 
         {/* Center Stats */}
         <div className="absolute bottom-2 text-center">
-          <span className="text-[11px] font-medium text-slate-500 block">Total Saved</span>
+          <span className="text-[11px] font-medium text-slate-500 block">
+            {totalDelivered > 0 ? 'Total Delivered' : 'Pipeline Total'}
+          </span>
           <span className="text-xl sm:text-2xl font-black text-slate-900 font-mono tracking-tight">
-            180 Meals
+            {totalDelivered > 0 ? `${totalDelivered} Meals` : `${activeInTransit > 0 ? activeInTransit : 180} Meals`}
           </span>
         </div>
       </div>
@@ -83,7 +104,7 @@ export const RadialGaugeCard: React.FC = () => {
       {/* Bottom Subtitle */}
       <div className="flex items-center justify-center space-x-1 text-xs text-emerald-800 font-semibold">
         <TrendingUp className="w-3.5 h-3.5 text-emerald-700" />
-        <span>+98.4% Zero-Waste Compliance</span>
+        <span>+{zeroWastePct}% Zero-Waste Compliance</span>
       </div>
 
     </div>
