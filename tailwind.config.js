@@ -7,23 +7,43 @@ export default {
   theme: {
     extend: {
       colors: {
-        forest: {
-          50: '#f0fdf4',
-          100: '#dcfce7',
-          500: '#22c55e',
-          600: '#16a34a',
-          700: '#15803d',
-          800: '#166534',
-          900: '#14532d',
-          950: '#052e16',
+        sage: {
+          50: '#F4F7F4',
+          100: '#E8EFE9',
+          200: '#DCE6DE',
+          300: '#CAD9CD',
+          400: '#B2C7B6',
+          500: '#8EAA93',
+          600: '#69886F',
+          700: '#4D6B53',
+          800: '#344D3A',
+          900: '#1F3324',
         },
-        saffron: {
-          50: '#fffbeb',
-          100: '#fef3c7',
-          500: '#f59e0b',
-          600: '#d97706',
-          700: '#b45309',
+        citron: {
+          300: '#F0FB78',
+          400: '#E5F940',
+          500: '#D8F523',
+          600: '#BFE00D',
+        },
+        darkcard: {
+          DEFAULT: '#111614',
+          border: '#1E2522',
+          lighter: '#1A211E',
+        },
+        forest: {
+          800: '#144337',
+          900: '#0C2D25',
+          950: '#071F19',
         }
+      },
+      fontFamily: {
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      },
+      borderRadius: {
+        '2xl': '18px',
+        '3xl': '24px',
+        '4xl': '32px',
       }
     },
   },

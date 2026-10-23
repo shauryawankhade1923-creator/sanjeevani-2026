@@ -1,7 +1,6 @@
 import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
-import { Navbar } from './components/Navbar';
-import { Sidebar } from './components/Sidebar';
+import { TopNav } from './components/TopNav';
 import { DashboardView } from './views/DashboardView';
 import { DonationsView } from './views/DonationsView';
 import { DispatchCenterView } from './views/DispatchCenterView';
@@ -14,22 +13,20 @@ const MainLayout: React.FC = () => {
   const { activeTab } = useApp();
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
-      <Navbar />
+    <div className="min-h-screen flex flex-col bg-[#E8EFE9] text-slate-800 antialiased selection:bg-[#E5F940] selection:text-slate-900">
+      {/* Top Floating Navigation Bar with Official Sanjeevani Brand */}
+      <TopNav />
 
-      <div className="flex-1 max-w-7xl w-full mx-auto flex flex-col md:flex-row">
-        <Sidebar />
-
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
-          {activeTab === 'dashboard' && <DashboardView />}
-          {activeTab === 'donations' && <DonationsView />}
-          {activeTab === 'dispatch' && <DispatchCenterView />}
-          {activeTab === 'volunteers' && <VolunteersView />}
-          {activeTab === 'shelters' && <SheltersView />}
-          {activeTab === 'events' && <LiveOperationsView />}
-          {activeTab === 'demo' && <DemoControlCenterView />}
-        </main>
-      </div>
+      {/* Main Container */}
+      <main className="flex-1 w-full max-w-[1520px] mx-auto px-4 sm:px-8 py-3">
+        {activeTab === 'dashboard' && <DashboardView />}
+        {activeTab === 'donations' && <DonationsView />}
+        {activeTab === 'dispatch' && <DispatchCenterView />}
+        {activeTab === 'volunteers' && <VolunteersView />}
+        {activeTab === 'shelters' && <SheltersView />}
+        {activeTab === 'events' && <LiveOperationsView />}
+        {activeTab === 'demo' && <DemoControlCenterView />}
+      </main>
     </div>
   );
 };
