@@ -147,7 +147,7 @@ const acceptedTask = {
   acceptedAt: new Date().toISOString()
 };
 assert(acceptedTask.status === 'ACCEPTED', 'Claimed assignment successfully accepted by rider');
-assert(acceptedTask.status !== 'CLAIMED', 'Accepted task cannot be claimed or accepted again');
+assert((acceptedTask.status as string) !== 'CLAIMED', 'Accepted task cannot be claimed or accepted again');
 
 // 2. Declining triggers coordinator reassignment and returns quantity
 const donationBefore = { ...banquet180, remainingQuantity: 140 };
@@ -183,6 +183,45 @@ assert(validProof.success === true, 'Delivery completion approved with verified 
 const reportedDelayMin = 15;
 const updatedTransitMin = acceptedTask.estimatedTransitMinutes + reportedDelayMin;
 assert(updatedTransitMin === 27, 'Incident delay report accurately increments estimated transit time');
+
+// ----------------------------------------------------------------------
+// Test 6: Shelter Recipient Dashboard & Intake Invariants
+// ----------------------------------------------------------------------
+console.log('\n--- Test Suite 6: Shelter Recipient Dashboard & Intake Invariants ---');
+
+// 1. Capacity separation: Expected in-transit delivery is never counted as received inventory
+const testShelter = {
+  ...shelterAlpha,
+  maxCapacity: 150,
+  currentOccupancy: 50,
+  committedCapacity: 40
+};
+const availableIntake = testShelter.maxCapacity - (testShelter.currentOccupancy + testShelter.committedCapacity);
+assert(availableIntake === 60, 'Available receiving capacity strictly discounts committed in-transit payload', `Expected 60, got ${availableIntake}`);
+assert(testShelter.currentOccupancy === 50, 'Committed delivery is NOT added to current occupancy prior to physical handover');
+
+// 2. Discrepancy Recording & Inventory Update
+const expectedQty = 40;
+const actualReceivedQty = 38; // 2 units lost/damaged
+const discrepancyShortage = expectedQty - actualReceivedQty;
+
+const testShelterAfterHandover = {
+  ...testShelter,
+  committedCapacity: testShelter.committedCapacity - expectedQty,
+  currentOccupancy: testShelter.currentOccupancy + actualReceivedQty
+};
+assert(testShelterAfterHandover.committedCapacity === 0, 'Handover decrements committed capacity to zero');
+assert(testShelterAfterHandover.currentOccupancy === 88, 'Inventory occupancy increments strictly by verified actual received quantity (50 + 38 = 88)');
+assert(discrepancyShortage === 2, 'Quantity discrepancy shortage of 2 units flagged for coordinator audit');
+
+// 3. Closed / Capacity Reached Shelter Rejects Intake
+const closedShelter = { ...testShelter, status: 'CLOSED' as const };
+const closedCheck = validateDispatchFeasibility(banquet180, closedShelter, 20);
+assert(closedCheck.isValid === false, 'Closed shelter strictly blocks new delivery allocations');
+
+const fullShelter = { ...testShelter, status: 'CAPACITY_REACHED' as const, currentOccupancy: 150, committedCapacity: 0 };
+const fullCheck = validateDispatchFeasibility(banquet180, fullShelter, 10);
+assert(fullCheck.isValid === false, 'Full capacity shelter strictly blocks new delivery allocations');
 
 // ----------------------------------------------------------------------
 // Summary

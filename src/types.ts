@@ -116,6 +116,8 @@ export interface Shelter {
   contactPerson: string;
   contactPhone: string;
   specialRestrictions?: string;
+  operatingHours?: string;
+  organizationType?: 'SHELTER' | 'COMMUNITY_KITCHEN' | 'RELIEF_CAMP' | 'CLINIC' | 'ORPHANAGE' | 'OTHER';
 }
 
 export interface DeliveryTask {
@@ -125,6 +127,8 @@ export interface DeliveryTask {
   originalShelterId: string;
   targetShelterId: string;
   quantity: number;
+  actualQuantityReceived?: number;
+  discrepancyReason?: string;
   status: TaskStatus;
   reservedAt: string;
   claimExpiresAt: string; // deadline before ghost reclaim

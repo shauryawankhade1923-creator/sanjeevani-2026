@@ -43,6 +43,13 @@ interface AppContextType {
   confirmArrivalAtDestination: (taskId: string) => { success: boolean; message: string };
   completeDeliveryWithProof: (taskId: string, proof: { recipientName: string; notes?: string; photoUrl?: string }) => { success: boolean; message: string };
 
+  // Shelter Dashboard & Recipient Organization
+  currentShelterId: string;
+  setCurrentShelterId: (id: string) => void;
+  updateShelterSettings: (shelterId: string, settings: Partial<Shelter>) => { success: boolean; message: string };
+  reportShelterStatusChange: (shelterId: string, status: Shelter['status'], reason?: string) => { success: boolean; message: string };
+  confirmShelterDeliveryReceipt: (taskId: string, proof: { receivedQuantity: number; discrepancyReason?: string; recipientName: string; notes?: string; photoUrl?: string }) => { success: boolean; message: string };
+
   // Actions
   createDonation: (data: Omit<Donation, 'id' | 'remainingQuantity' | 'status' | 'createdAt'>) => Donation;
   updateDonation: (donationId: string, updates: Partial<Donation>) => { success: boolean; message: string };
@@ -158,6 +165,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       localStorage.setItem(`${LOCAL_STORAGE_KEY}_currentRiderId`, currentRiderId);
     } catch (e) {}
   }, [currentRiderId]);
+
+  const [currentShelterId, setCurrentShelterId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_currentShelterId`);
+      if (saved) return saved;
+    } catch (e) {}
+    return 'sh-01'; // Default: Shelter Alpha
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_currentShelterId`, currentShelterId);
+    } catch (e) {}
+  }, [currentShelterId]);
 
   // References to eliminate React closure staleness in timeouts and intervals
   const donationsRef = useRef(donations);
@@ -1432,6 +1453,194 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setPendingRerouteTask(null);
   };
 
+  // Shelter Settings Update
+  const updateShelterSettings = (shelterId: string, settings: Partial<Shelter>): { success: boolean; message: string } => {
+    const shelter = sheltersRef.current.find(s => s.id === shelterId);
+    if (!shelter) return { success: false, message: 'Shelter not found.' };
+
+    setShelters(prev =>
+      prev.map(s => {
+        if (s.id === shelterId) {
+          const updated = { ...s, ...settings };
+          if (updated.currentOccupancy > updated.maxCapacity) {
+            updated.currentOccupancy = updated.maxCapacity;
+          }
+          return updated;
+        }
+        return s;
+      })
+    );
+
+    addLogEvent(
+      'INFO',
+      'SHELTER',
+      `Facility Settings Updated: ${shelter.name}`,
+      `Infrastructure parameters updated: Max Cap: ${settings.maxCapacity ?? shelter.maxCapacity}, Water: ${settings.hasCleanWater !== undefined ? settings.hasCleanWater : shelter.hasCleanWater}, Kitchen: ${settings.hasCookingFuel !== undefined ? settings.hasCookingFuel : shelter.hasCookingFuel}, Refrig: ${settings.hasRefrigeration !== undefined ? settings.hasRefrigeration : shelter.hasRefrigeration}.`,
+      { shelterId, updates: settings }
+    );
+
+    return { success: true, message: 'Organization facility settings saved successfully.' };
+  };
+
+  // Report Shelter Status Change (Temporary Closure, Full Capacity, or Resumed)
+  const reportShelterStatusChange = (shelterId: string, status: Shelter['status'], reason?: string): { success: boolean; message: string } => {
+    const shelter = sheltersRef.current.find(s => s.id === shelterId);
+    if (!shelter) return { success: false, message: 'Shelter not found.' };
+
+    setShelters(prev =>
+      prev.map(s => s.id === shelterId ? { ...s, status } : s)
+    );
+
+    // If status is CLOSED or CAPACITY_REACHED, find in-transit tasks targeting this shelter
+    if (status === 'CLOSED' || status === 'CAPACITY_REACHED') {
+      const endangeredTasks = tasksRef.current.filter(
+        t => t.targetShelterId === shelterId && (t.status === 'IN_TRANSIT' || t.status === 'CLAIMED' || t.status === 'ACCEPTED' || t.status === 'ARRIVED_PICKUP')
+      );
+
+      if (endangeredTasks.length > 0) {
+        setPendingRerouteTask(endangeredTasks[0]);
+      }
+
+      addLogEvent(
+        'CRITICAL',
+        'SHELTER',
+        `Shelter Status Reported: ${status} (${shelter.name})`,
+        `Shelter coordinator declared ${status}. Reason: "${reason || 'Operational contingency'}". Coordinator intervention triggered for incoming aid batches.`,
+        { shelterId, status, reason }
+      );
+
+      return {
+        success: true,
+        message: `Shelter marked ${status}. Coordinator alerted and incoming cargo rerouting armed.`
+      };
+    }
+
+    addLogEvent(
+      'INFO',
+      'SHELTER',
+      `Shelter Status Resumed: ${status} (${shelter.name})`,
+      `Shelter resumed ${status} intake status. Ready for incoming aid dispatches.`,
+      { shelterId, status }
+    );
+
+    return {
+      success: true,
+      message: `Operating status updated to ${status}.`
+    };
+  };
+
+  // Shelter Confirms Delivery Receipt with Discrepancy Recording
+  const confirmShelterDeliveryReceipt = (
+    taskId: string,
+    proof: {
+      receivedQuantity: number;
+      discrepancyReason?: string;
+      recipientName: string;
+      notes?: string;
+      photoUrl?: string;
+    }
+  ): { success: boolean; message: string } => {
+    if (!proof.recipientName || proof.recipientName.trim().length === 0) {
+      return { success: false, message: 'Receiver / Supervisor name is mandatory to confirm delivery.' };
+    }
+
+    if (proof.receivedQuantity < 0) {
+      return { success: false, message: 'Received quantity cannot be negative.' };
+    }
+
+    const task = tasksRef.current.find(t => t.id === taskId);
+    if (!task) return { success: false, message: 'Delivery task not found.' };
+
+    const expectedQuantity = task.quantity;
+    const actualQuantity = Number(proof.receivedQuantity);
+    const hasDiscrepancy = actualQuantity !== expectedQuantity;
+
+    // 1. Update task
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: 'DELIVERED',
+              deliveredAt: new Date().toISOString(),
+              actualQuantityReceived: actualQuantity,
+              discrepancyReason: hasDiscrepancy ? (proof.discrepancyReason || 'Quantity discrepancy recorded at receiver intake') : undefined,
+              proofRecipientName: proof.recipientName.trim(),
+              proofNotes: proof.notes?.trim(),
+              proofPhotoUrl: proof.photoUrl
+            }
+          : t
+      )
+    );
+
+    // 2. Free rider
+    setVolunteers(prev =>
+      prev.map(v =>
+        v.id === task.riderId
+          ? { ...v, status: 'AVAILABLE', activeTaskId: undefined, lastPingTime: new Date().toISOString(), responsiveness: 'ACTIVE' }
+          : v
+      )
+    );
+
+    // 3. Update shelter inventory strictly with actual received quantity
+    setShelters(prev =>
+      prev.map(s => {
+        if (s.id === task.targetShelterId) {
+          const newCommitted = Math.max(0, s.committedCapacity - expectedQuantity);
+          const newOccupancy = Math.min(s.maxCapacity, s.currentOccupancy + actualQuantity);
+          return {
+            ...s,
+            committedCapacity: newCommitted,
+            currentOccupancy: newOccupancy,
+            status: newOccupancy >= s.maxCapacity ? 'CAPACITY_REACHED' : s.status
+          };
+        }
+        return s;
+      })
+    );
+
+    // 4. Update donation status if all tasks are delivered
+    setDonations(prev =>
+      prev.map(d => {
+        if (d.id === task.donationId) {
+          return { ...d, status: 'DELIVERED' };
+        }
+        return d;
+      })
+    );
+
+    const shelter = sheltersRef.current.find(s => s.id === task.targetShelterId);
+    const donation = donationsRef.current.find(d => d.id === task.donationId);
+
+    if (hasDiscrepancy) {
+      addLogEvent(
+        'WARNING',
+        'DISPATCH',
+        `Discrepancy Flagged at Receiver Intake (${shelter?.name})`,
+        `Expected ${expectedQuantity} units of ${donation?.itemTitle || 'cargo'}, but received ${actualQuantity} units. Shortage: ${expectedQuantity - actualQuantity} units. Reason: "${proof.discrepancyReason || 'Transport damage'}". Signoff: ${proof.recipientName}.`,
+        { taskId, expected: expectedQuantity, actual: actualQuantity, reason: proof.discrepancyReason }
+      );
+
+      return {
+        success: true,
+        message: `Delivery confirmed with discrepancy flagged (${actualQuantity}/${expectedQuantity} units). Inventory updated.`
+      };
+    }
+
+    addLogEvent(
+      'SUCCESS',
+      'DISPATCH',
+      `Aid Handover Verified: ${shelter?.name}`,
+      `Successfully received and verified full batch of ${actualQuantity} units of ${donation?.itemTitle || 'Aid Cargo'}. Signoff: ${proof.recipientName}. Added to shelter inventory.`,
+      { taskId, quantity: actualQuantity, shelter: shelter?.name }
+    );
+
+    return {
+      success: true,
+      message: `Successfully confirmed receipt of ${actualQuantity} units. Inventory and capacity updated.`
+    };
+  };
+
   // Dynamic Rerouting Engine
   const rerouteTask = (taskId: string, newShelterId: string, reason: string): boolean => {
     const task = tasksRef.current.find((t) => t.id === taskId);
@@ -1700,6 +1909,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         reportDelayOrProblem,
         confirmArrivalAtDestination,
         completeDeliveryWithProof,
+        currentShelterId,
+        setCurrentShelterId,
+        updateShelterSettings,
+        reportShelterStatusChange,
+        confirmShelterDeliveryReceipt,
         selectedDonationId,
         setSelectedDonationId,
         timeMultiplier,
