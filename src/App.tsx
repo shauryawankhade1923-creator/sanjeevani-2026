@@ -6,6 +6,7 @@ import { DonationsView } from './views/DonationsView';
 import { DispatchCenterView } from './views/DispatchCenterView';
 import { VolunteersView } from './views/VolunteersView';
 import { SheltersView } from './views/SheltersView';
+import { AdminDashboardView } from './views/AdminDashboardView';
 import { LiveOperationsView } from './views/LiveOperationsView';
 import { DemoControlCenterView } from './views/DemoControlCenterView';
 
@@ -24,6 +25,7 @@ const MainLayout: React.FC = () => {
         {activeTab === 'dispatch' && <DispatchCenterView />}
         {activeTab === 'volunteers' && <VolunteersView />}
         {activeTab === 'shelters' && <SheltersView />}
+        {activeTab === 'admin' && <AdminDashboardView />}
         {(activeTab === 'events' || activeTab === 'live') && <LiveOperationsView />}
         {activeTab === 'demo' && <DemoControlCenterView />}
       </main>

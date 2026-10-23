@@ -1,4 +1,4 @@
-import { Donation, Shelter, Volunteer, LogEvent } from '../types';
+import { Donation, Shelter, Volunteer, LogEvent, PlatformUser, PlatformConfig } from '../types';
 
 export const getFreshInitialDonations = (): Donation[] => [
   {
@@ -226,6 +226,78 @@ export const getFreshInitialLogEvents = (): LogEvent[] => [
     message: 'The Grand Regal Banquet registered 180 cooked meals. Expiry deadline set to 75 minutes. Accelerated watchdog active.',
   }
 ];
+
+export const getFreshInitialUsers = (): PlatformUser[] => [
+  {
+    id: 'usr-01',
+    name: 'Dr. Meera Nambiar',
+    email: 'meera.nambiar@sanjeevani.org',
+    role: 'SUPER_ADMIN',
+    status: 'ACTIVE',
+    organization: 'Sanjeevani Central Secretariat',
+    phone: '+91 98111 00001',
+    registeredAt: '2026-01-10T08:00:00.000Z'
+  },
+  {
+    id: 'usr-02',
+    name: 'Aditya Verma',
+    email: 'aditya.v@sanjeevani.org',
+    role: 'RELIEF_COORDINATOR',
+    status: 'ACTIVE',
+    organization: 'Delhi Crisis Response Cell',
+    phone: '+91 98111 00002',
+    registeredAt: '2026-01-12T09:30:00.000Z'
+  },
+  {
+    id: 'usr-03',
+    name: 'Chef Alok Singhania',
+    email: 'alok.s@grandregal.com',
+    role: 'DONOR_COORDINATOR',
+    status: 'ACTIVE',
+    organization: 'The Grand Regal Banquet Hall',
+    phone: '+91 98765 43210',
+    registeredAt: '2026-02-01T11:15:00.000Z'
+  },
+  {
+    id: 'usr-04',
+    name: 'Ramesh Kumar',
+    email: 'ramesh.k@fieldcourier.org',
+    role: 'FIELD_COURIER',
+    status: 'ACTIVE',
+    organization: 'Delhi Volunteer Courier Squad',
+    phone: '+91 98101 23456',
+    registeredAt: '2026-02-14T14:20:00.000Z'
+  },
+  {
+    id: 'usr-05',
+    name: 'Rajesh Kumar',
+    email: 'rajesh.k@delhicamps.gov.in',
+    role: 'SHELTER_SUPERVISOR',
+    status: 'ACTIVE',
+    organization: 'Shelter Alpha (Central Community Camp)',
+    phone: '+91 98200 11223',
+    registeredAt: '2026-02-18T16:45:00.000Z'
+  },
+  {
+    id: 'usr-06',
+    name: 'Sunita Devi',
+    email: 'sunita.d@kashmerekitchen.org',
+    role: 'SHELTER_SUPERVISOR',
+    status: 'ACTIVE',
+    organization: 'Shelter Beta (Kashmere Gate Community Kitchen)',
+    phone: '+91 98300 22334',
+    registeredAt: '2026-03-01T10:00:00.000Z'
+  }
+];
+
+export const getFreshInitialConfig = (): PlatformConfig => ({
+  claimTtlSeconds: 30, // accelerated 30s claim watchdog for demonstration
+  expiryWarningMinutes: 60,
+  expiryCriticalMinutes: 30,
+  enforceSafetyDependencies: true,
+  supportedCategories: ['COOKED_MEALS', 'BABY_FORMULA', 'RAW_RATIONS', 'COLD_CHAIN_MEDS', 'PACKAGED_FOOD'],
+  maxRiderPayloadCap: 50
+});
 
 // Fallback constants
 export const INITIAL_DONATIONS = getFreshInitialDonations();

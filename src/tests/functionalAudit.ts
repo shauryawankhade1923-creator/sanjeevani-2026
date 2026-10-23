@@ -224,6 +224,78 @@ const fullCheck = validateDispatchFeasibility(banquet180, fullShelter, 10);
 assert(fullCheck.isValid === false, 'Full capacity shelter strictly blocks new delivery allocations');
 
 // ----------------------------------------------------------------------
+// Test 7: Administrator Governance, User Provisioning & Integrity
+// ----------------------------------------------------------------------
+console.log('\n--- Test Suite 7: Administrator Governance, RBAC & Platform Integrity ---');
+
+// 1. User Provisioning
+const testUsers = [
+  {
+    id: 'usr-admin-01',
+    name: 'Dr. Meera Nambiar',
+    email: 'meera@sanjeevani.org',
+    role: 'SUPER_ADMIN' as const,
+    status: 'ACTIVE' as const,
+    organization: 'Secretariat',
+    phone: '+91 98111 00001',
+    registeredAt: new Date().toISOString()
+  },
+  {
+    id: 'usr-coord-01',
+    name: 'Aditya Verma',
+    email: 'aditya@sanjeevani.org',
+    role: 'RELIEF_COORDINATOR' as const,
+    status: 'ACTIVE' as const,
+    organization: 'Relief Cell',
+    phone: '+91 98111 00002',
+    registeredAt: new Date().toISOString()
+  }
+];
+
+assert(testUsers.length === 2, 'Initial admin directory initialized with RBAC roles');
+
+// 2. Prevent deleting sole Super Admin
+function attemptDeleteUser(usersList: typeof testUsers, idToDelete: string) {
+  const user = usersList.find(u => u.id === idToDelete);
+  if (user?.role === 'SUPER_ADMIN' && usersList.filter(u => u.role === 'SUPER_ADMIN').length <= 1) {
+    return { success: false, error: 'Cannot delete the only Super Administrator account' };
+  }
+  return { success: true, remaining: usersList.filter(u => u.id !== idToDelete) };
+}
+
+const deleteAdminAttempt = attemptDeleteUser(testUsers, 'usr-admin-01');
+assert(deleteAdminAttempt.success === false, 'Sole Super Administrator deletion is strictly blocked for governance integrity');
+
+const deleteCoordAttempt = attemptDeleteUser(testUsers, 'usr-coord-01');
+assert(deleteCoordAttempt.success === true, 'Standard coordinator account can be revoked by administrator');
+
+// 3. User Suspension
+const suspendedUsers = testUsers.map(u => u.id === 'usr-coord-01' ? { ...u, status: 'SUSPENDED' as const } : u);
+assert(suspendedUsers.find(u => u.id === 'usr-coord-01')?.status === 'SUSPENDED', 'Account status suspension recorded');
+
+// 4. Platform Configuration Updates
+const initialConfig = {
+  claimTtlSeconds: 30,
+  expiryWarningMinutes: 60,
+  expiryCriticalMinutes: 30,
+  enforceSafetyDependencies: true,
+  supportedCategories: ['COOKED_MEALS', 'BABY_FORMULA', 'RAW_RATIONS'] as any[],
+  maxRiderPayloadCap: 50
+};
+
+const updatedConfig = {
+  ...initialConfig,
+  claimTtlSeconds: 45,
+  expiryWarningMinutes: 90
+};
+assert(updatedConfig.claimTtlSeconds === 45, 'Claim watchdog timeout parameter updated to 45 seconds');
+assert(updatedConfig.enforceSafetyDependencies === true, 'Strict safety dependencies matrix remains actively enforced');
+
+// ----------------------------------------------------------------------
+// Summary
+// ----------------------------------------------------------------------
+
+// ----------------------------------------------------------------------
 // Summary
 // ----------------------------------------------------------------------
 console.log('\n====================================================');

@@ -8,13 +8,19 @@ import {
   EventSeverity,
   AidCategory,
   RiderStatus,
-  DelayReport
+  DelayReport,
+  PlatformUser,
+  PlatformConfig,
+  UserRole,
+  UserStatus
 } from '../types';
 import { 
   getFreshInitialDonations, 
   getFreshInitialShelters, 
   getFreshInitialVolunteers, 
-  getFreshInitialLogEvents 
+  getFreshInitialLogEvents,
+  getFreshInitialUsers,
+  getFreshInitialConfig
 } from '../data/initialData';
 import { calculateBatchSplit, getRemainingShelfLifeMinutes, findRerouteAlternatives } from '../utils/engine';
 import { calculateDistanceKm, estimateTransitMinutes } from '../utils/geo';
@@ -49,6 +55,15 @@ interface AppContextType {
   updateShelterSettings: (shelterId: string, settings: Partial<Shelter>) => { success: boolean; message: string };
   reportShelterStatusChange: (shelterId: string, status: Shelter['status'], reason?: string) => { success: boolean; message: string };
   confirmShelterDeliveryReceipt: (taskId: string, proof: { receivedQuantity: number; discrepancyReason?: string; recipientName: string; notes?: string; photoUrl?: string }) => { success: boolean; message: string };
+
+  // Admin & Operational Governance
+  users: PlatformUser[];
+  config: PlatformConfig;
+  addUser: (userData: Omit<PlatformUser, 'id' | 'registeredAt'>) => { success: boolean; message: string };
+  updateUserStatus: (userId: string, status: UserStatus) => { success: boolean; message: string };
+  updateUserRole: (userId: string, role: UserRole) => { success: boolean; message: string };
+  deleteUser: (userId: string) => { success: boolean; message: string };
+  updatePlatformConfig: (newConfig: Partial<PlatformConfig>) => { success: boolean; message: string };
 
   // Actions
   createDonation: (data: Omit<Donation, 'id' | 'remainingQuantity' | 'status' | 'createdAt'>) => Donation;
@@ -179,6 +194,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       localStorage.setItem(`${LOCAL_STORAGE_KEY}_currentShelterId`, currentShelterId);
     } catch (e) {}
   }, [currentShelterId]);
+
+  const [users, setUsers] = useState<PlatformUser[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_users`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return getFreshInitialUsers();
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_users`, JSON.stringify(users));
+    } catch (e) {}
+  }, [users]);
+
+  const [config, setConfig] = useState<PlatformConfig>(() => {
+    try {
+      const saved = localStorage.getItem(`${LOCAL_STORAGE_KEY}_config`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return getFreshInitialConfig();
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${LOCAL_STORAGE_KEY}_config`, JSON.stringify(config));
+    } catch (e) {}
+  }, [config]);
 
   // References to eliminate React closure staleness in timeouts and intervals
   const donationsRef = useRef(donations);
@@ -1702,6 +1745,100 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return true;
   };
 
+  // Admin User & Governance Actions
+  const addUser = (userData: Omit<PlatformUser, 'id' | 'registeredAt'>): { success: boolean; message: string } => {
+    if (!userData.name || !userData.email) {
+      return { success: false, message: 'Name and email are mandatory fields.' };
+    }
+
+    const newUser: PlatformUser = {
+      ...userData,
+      id: `usr-${Date.now().toString().slice(-4)}`,
+      registeredAt: new Date().toISOString()
+    };
+
+    setUsers(prev => [newUser, ...prev]);
+
+    addLogEvent(
+      'INFO',
+      'SYSTEM',
+      `New Platform User Registered`,
+      `Administrator provisioned account for ${userData.name} (${userData.role}) at ${userData.organization}.`,
+      { userId: newUser.id, role: userData.role }
+    );
+
+    return { success: true, message: `User ${userData.name} created successfully.` };
+  };
+
+  const updateUserStatus = (userId: string, status: UserStatus): { success: boolean; message: string } => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return { success: false, message: 'User not found.' };
+
+    setUsers(prev => prev.map(u => u.id === userId ? { ...u, status } : u));
+
+    addLogEvent(
+      'WARNING',
+      'SYSTEM',
+      `User Account Status Modified`,
+      `User ${user.name} (${user.email}) status changed to ${status}.`,
+      { userId, status }
+    );
+
+    return { success: true, message: `Account status updated to ${status}.` };
+  };
+
+  const updateUserRole = (userId: string, role: UserRole): { success: boolean; message: string } => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return { success: false, message: 'User not found.' };
+
+    setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
+
+    addLogEvent(
+      'WARNING',
+      'SYSTEM',
+      `User Role Permissions Modified`,
+      `User ${user.name} role changed to ${role} by Administrator.`,
+      { userId, role }
+    );
+
+    return { success: true, message: `Role updated to ${role}.` };
+  };
+
+  const deleteUser = (userId: string): { success: boolean; message: string } => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return { success: false, message: 'User not found.' };
+
+    if (user.role === 'SUPER_ADMIN' && users.filter(u => u.role === 'SUPER_ADMIN').length <= 1) {
+      return { success: false, message: 'Cannot delete the only Super Administrator account.' };
+    }
+
+    setUsers(prev => prev.filter(u => u.id !== userId));
+
+    addLogEvent(
+      'WARNING',
+      'SYSTEM',
+      `User Account Revoked`,
+      `Account for ${user.name} (${user.email}) deleted by Administrator.`,
+      { userId }
+    );
+
+    return { success: true, message: `User account deleted.` };
+  };
+
+  const updatePlatformConfig = (newConfig: Partial<PlatformConfig>): { success: boolean; message: string } => {
+    setConfig(prev => ({ ...prev, ...newConfig }));
+
+    addLogEvent(
+      'INFO',
+      'SYSTEM',
+      `Platform Configuration Updated`,
+      `System operational parameters modified (Watchdog TTL: ${newConfig.claimTtlSeconds ?? config.claimTtlSeconds}s, Safety Matrix: ${newConfig.enforceSafetyDependencies !== undefined ? newConfig.enforceSafetyDependencies : config.enforceSafetyDependencies}).`,
+      { updates: newConfig }
+    );
+
+    return { success: true, message: 'Platform system parameters saved successfully.' };
+  };
+
   // Reset Everything Cleanly
   const resetAllData = () => {
     // Clear any pending timeouts
@@ -1712,12 +1849,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const freshShelters = getFreshInitialShelters();
     const freshVolunteers = getFreshInitialVolunteers();
     const freshEvents = getFreshInitialLogEvents();
+    const freshUsers = getFreshInitialUsers();
+    const freshConfig = getFreshInitialConfig();
 
     setDonations(freshDonations);
     setShelters(freshShelters);
     setVolunteers(freshVolunteers);
     setTasks([]);
     setEvents(freshEvents);
+    setUsers(freshUsers);
+    setConfig(freshConfig);
     setSelectedDonationId(freshDonations[0].id);
     setActiveScenario('NONE');
     setScenarioStep(0);
@@ -1914,6 +2055,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         updateShelterSettings,
         reportShelterStatusChange,
         confirmShelterDeliveryReceipt,
+        users,
+        config,
+        addUser,
+        updateUserStatus,
+        updateUserRole,
+        deleteUser,
+        updatePlatformConfig,
         selectedDonationId,
         setSelectedDonationId,
         timeMultiplier,

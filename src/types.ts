@@ -178,3 +178,32 @@ export interface DispatchScoreBreakdown {
   compositeScore: number;
   explanation: string;
 }
+
+export type UserRole = 
+  | 'SUPER_ADMIN'
+  | 'RELIEF_COORDINATOR'
+  | 'DONOR_COORDINATOR'
+  | 'FIELD_COURIER'
+  | 'SHELTER_SUPERVISOR';
+
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'PENDING_VERIFICATION';
+
+export interface PlatformUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  organization: string;
+  phone: string;
+  registeredAt: string;
+}
+
+export interface PlatformConfig {
+  claimTtlSeconds: number;
+  expiryWarningMinutes: number;
+  expiryCriticalMinutes: number;
+  enforceSafetyDependencies: boolean;
+  supportedCategories: AidCategory[];
+  maxRiderPayloadCap: number;
+}
